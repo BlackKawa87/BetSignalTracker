@@ -56,6 +56,28 @@ export interface DashboardStats {
   currentStake: number
 }
 
+export interface ProcessingLog {
+  id: string
+  created_at: string
+  signal_id: string | null
+  action: string
+  details: Record<string, unknown>
+  result: string | null
+  signals?: {
+    home_team: string | null
+    away_team: string | null
+    market: string | null
+  } | null
+}
+
+export interface AutoCloseStatus {
+  ok: boolean
+  apiKeySet: boolean
+  lastRun: string | null
+  eligiblePending: number
+  today: { closed: number; green: number; red: number }
+}
+
 export interface ParsedSignal {
   home_team: string | null
   away_team: string | null

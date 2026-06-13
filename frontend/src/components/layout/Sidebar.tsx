@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, History, BarChart2, Settings, Zap } from 'lucide-react'
+import { LayoutDashboard, History, BarChart2, Settings, Zap, Bot } from 'lucide-react'
 import { useApp } from '../../contexts/AppContext'
 import { formatCurrency } from '../../utils/helpers'
 
 const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/historico', label: 'Histórico', icon: History, end: false },
-  { to: '/estatisticas', label: 'Estatísticas', icon: BarChart2, end: false },
-  { to: '/configuracoes', label: 'Configurações', icon: Settings, end: false },
+  { to: '/',              label: 'Dashboard',     icon: LayoutDashboard, end: true  },
+  { to: '/historico',     label: 'Histórico',     icon: History,         end: false },
+  { to: '/estatisticas',  label: 'Estatísticas',  icon: BarChart2,       end: false },
+  { to: '/auto-close',    label: 'Auto-Close',    icon: Bot,             end: false },
+  { to: '/configuracoes', label: 'Configurações', icon: Settings,        end: false },
 ]
 
 export function Sidebar() {
@@ -35,7 +36,8 @@ export function Sidebar() {
           </p>
           {stats && (
             <p className={`text-[10px] font-mono mt-0.5 ${stats.totalProfitLoss >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-              {stats.totalProfitLoss >= 0 ? '+' : ''}{formatCurrency(stats.totalProfitLoss)} total
+              {stats.totalProfitLoss >= 0 ? '+' : ''}
+              {formatCurrency(stats.totalProfitLoss)} total
             </p>
           )}
         </div>
@@ -68,6 +70,11 @@ export function Sidebar() {
             <span className="text-gray-500">{stats.winRate.toFixed(0)}%</span>
             <span className="text-accent-red">{stats.reds}L</span>
           </div>
+          {stats.needsReview > 0 && (
+            <p className="text-[10px] text-orange-400 font-mono mt-1 text-center">
+              {stats.needsReview} p/ revisar
+            </p>
+          )}
         </div>
       )}
     </aside>

@@ -8,6 +8,12 @@
       "destination": "/index.html"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron/autoclose",
+      "schedule": "*/15 * * * *"
+    }
+  ],
   "experimentalServices": {
     "frontend": {
       "entrypoint": "frontend",

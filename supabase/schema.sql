@@ -52,20 +52,35 @@ create table if not exists public.bankroll_history (
   signal_id  uuid          references public.signals(id) on delete set null
 );
 
+-- ── Processing Logs ──────────────────────────────────────────
+create table if not exists public.processing_logs (
+  id         uuid        primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  signal_id  uuid        references public.signals(id) on delete cascade,
+  action     text        not null,
+  details    jsonb       not null default '{}',
+  result     text
+);
+
 -- ── Indexes ──────────────────────────────────────────────────
-create index if not exists signals_status_idx     on public.signals(status);
-create index if not exists signals_created_at_idx on public.signals(created_at desc);
-create index if not exists signals_received_at_idx on public.signals(received_at desc);
-create index if not exists bh_created_at_idx      on public.bankroll_history(created_at desc);
+create index if not exists signals_status_idx        on public.signals(status);
+create index if not exists signals_created_at_idx    on public.signals(created_at desc);
+create index if not exists signals_received_at_idx   on public.signals(received_at desc);
+create index if not exists bh_created_at_idx         on public.bankroll_history(created_at desc);
+create index if not exists pl_signal_id_idx          on public.processing_logs(signal_id);
+create index if not exists pl_created_at_idx         on public.processing_logs(created_at desc);
+create index if not exists pl_action_idx             on public.processing_logs(action);
 
 -- ── Row Level Security ───────────────────────────────────────
 alter table public.settings         enable row level security;
 alter table public.signals          enable row level security;
 alter table public.bankroll_history enable row level security;
+alter table public.processing_logs  enable row level security;
 
 drop policy if exists "Allow all settings"         on public.settings;
 drop policy if exists "Allow all signals"          on public.signals;
 drop policy if exists "Allow all bankroll_history" on public.bankroll_history;
+drop policy if exists "Allow all processing_logs"  on public.processing_logs;
 
 create policy "Allow all settings"
   on public.settings for all using (true) with check (true);
@@ -75,3 +90,6 @@ create policy "Allow all signals"
 
 create policy "Allow all bankroll_history"
   on public.bankroll_history for all using (true) with check (true);
+
+create policy "Allow all processing_logs"
+  on public.processing_logs for all using (true) with check (true);
