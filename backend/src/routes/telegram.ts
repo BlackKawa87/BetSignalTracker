@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express'
 import { supabase } from '../utils/supabase'
 import { parseSignalMessage } from '../utils/signalParser'
 import { sendMessage, setWebhook, getWebhookInfo, downloadPhotoAsBase64 } from '../utils/telegram'
-import { extractSignalFromImage, parseClaudeResponse } from '../utils/imageOcr'
+import { extractSignalFromImage, OcrResult } from '../utils/imageOcr'
 
 const router = Router()
 
@@ -39,8 +39,19 @@ function getLargestPhoto(photos: PhotoSize[]): PhotoSize {
 }
 
 function buildReply(
-  data: { home_team?: string | null; away_team?: string | null; market?: string | null; odd?: number | null; competition?: string | null; match_time?: string | null; status: string },
+  data: {
+    home_team?: string | null
+    away_team?: string | null
+    market?: string | null
+    odd?: number | null
+    competition?: string | null
+    match_time?: string | null
+    status: string
+    recommended_stake_pct?: number | null
+    is_multiple?: boolean
+  },
   stake: number,
+  stakePct: number,
   source: 'text' | 'image',
 ): string {
   const icon = source === 'image' ? '🖼️' : '📨'
@@ -53,15 +64,18 @@ function buildReply(
     )
   }
 
-  const game = `${data.home_team} x ${data.away_team}`
+  const isMultiple = data.is_multiple
+  const game = isMultiple ? '🎰 Múltipla' : `${data.home_team} x ${data.away_team}`
+
   const lines = [
     `✅ <b>Sinal registrado!</b> ${icon}`,
     ``,
     `⚽ <b>${game}</b>`,
     `📊 Mercado: ${data.market}`,
     `🎯 Odd: ${Number(data.odd).toFixed(2)}`,
-    `💰 Stake: R$ ${stake.toFixed(2)}`,
+    `💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`,
   ]
+  if (data.recommended_stake_pct) lines.push(`📌 Stake do tipster: ${data.recommended_stake_pct}%`)
   if (data.competition) lines.push(`🏆 ${data.competition}`)
   if (data.match_time) lines.push(`🕐 ${data.match_time}`)
 
@@ -93,59 +107,80 @@ async function processTextSignal(text: string, settings: { current_bankroll: num
     },
     replyData: { ...parsed, status: parsed.status },
     stake,
+    stakePct: settings.stake_percentage,
     source: 'text' as const,
   }
 }
 
 // ── Process image signal ──────────────────────────────────────────────────────
 
-async function processImageSignal(photo: PhotoSize, caption: string | undefined, settings: { current_bankroll: number; stake_percentage: number; preferred_bookmaker: string }, messageId: number) {
+async function processImageSignal(
+  photo: PhotoSize,
+  caption: string | undefined,
+  settings: { current_bankroll: number; stake_percentage: number; preferred_bookmaker: string },
+  messageId: number,
+) {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY not configured — cannot process image signals')
   }
 
   const { base64, mediaType } = await downloadPhotoAsBase64(photo.file_id)
-  const jsonText = await extractSignalFromImage(base64, mediaType)
-  const extracted = parseClaudeResponse(jsonText)
+  const ocr: OcrResult = await extractSignalFromImage(base64, mediaType)
 
-  const rawText = (extracted.raw_text as string) || caption || '[imagem sem texto]'
-  const odd = extracted.odd ? Number(extracted.odd) : null
+  const rawText = ocr.raw_text || caption || '[imagem]'
 
   const missing: string[] = []
-  if (!extracted.home_team || !extracted.away_team) missing.push('times')
-  if (!odd) missing.push('odd')
-  if (!extracted.market) missing.push('mercado')
+  if (!ocr.home_team && !ocr.is_multiple) missing.push('times')
+  if (!ocr.odd) missing.push('odd')
+  if (!ocr.market) missing.push('mercado')
 
   const status = missing.length > 0 ? 'needs_review' : 'pending'
-  const stake = Math.round((settings.current_bankroll * settings.stake_percentage) / 100 * 100) / 100
+
+  // Use stake % from signal image if provided, otherwise use settings default
+  const stakePct = ocr.recommended_stake_pct ?? settings.stake_percentage
+  const stake = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+
+  // Build market label including selection
+  const marketLabel = ocr.selection && ocr.market
+    ? `${ocr.market} - ${ocr.selection}`
+    : ocr.market
+
+  const notes: string[] = []
+  if (missing.length > 0) notes.push(`Revisão: ${missing.join(', ')}`)
+  if (ocr.recommended_stake_pct) notes.push(`Stake recomendada pelo tipster: ${ocr.recommended_stake_pct}%`)
+  if (ocr.is_multiple) notes.push('Múltipla')
+  if (ocr.match_date) notes.push(`Data: ${ocr.match_date}`)
 
   return {
     signal: {
       received_at: new Date().toISOString(),
-      home_team: (extracted.home_team as string) || null,
-      away_team: (extracted.away_team as string) || null,
-      market: (extracted.market as string) || null,
-      odd,
-      competition: (extracted.competition as string) || null,
-      bookmaker: (extracted.bookmaker as string) || settings.preferred_bookmaker,
-      match_time: (extracted.match_time as string) || null,
+      home_team: ocr.home_team,
+      away_team: ocr.away_team,
+      market: marketLabel,
+      odd: ocr.odd,
+      competition: ocr.competition,
+      bookmaker: ocr.bookmaker ?? settings.preferred_bookmaker,
+      match_time: ocr.match_time,
       stake,
       status,
       profit_loss: null,
       raw_text: rawText,
       telegram_message_id: messageId,
-      notes: missing.length > 0 ? `Revisão: ${missing.join(', ')}` : null,
+      notes: notes.length > 0 ? notes.join(' | ') : null,
     },
     replyData: {
-      home_team: (extracted.home_team as string) || null,
-      away_team: (extracted.away_team as string) || null,
-      market: (extracted.market as string) || null,
-      odd,
-      competition: (extracted.competition as string) || null,
-      match_time: (extracted.match_time as string) || null,
+      home_team: ocr.home_team,
+      away_team: ocr.away_team,
+      market: marketLabel,
+      odd: ocr.odd,
+      competition: ocr.competition,
+      match_time: ocr.match_time,
       status,
+      recommended_stake_pct: ocr.recommended_stake_pct,
+      is_multiple: ocr.is_multiple,
     },
     stake,
+    stakePct,
     source: 'image' as const,
   }
 }
@@ -214,7 +249,8 @@ router.post('/webhook', async (req: Request, res: Response) => {
     }
 
     console.log(`Signal saved | source: ${result.source} | status: ${result.signal.status} | ${result.signal.home_team} x ${result.signal.away_team} | odd: ${result.signal.odd}`)
-    await sendMessage(chatId, buildReply(result.replyData, result.stake, result.source))
+    const stakePct = 'stakePct' in result ? result.stakePct : settings.stake_percentage
+    await sendMessage(chatId, buildReply(result.replyData, result.stake, stakePct, result.source))
 
   } catch (err) {
     console.error('Webhook error:', err)
