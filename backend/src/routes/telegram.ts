@@ -134,7 +134,7 @@ async function processImageSignal(
   if (!ocr.odd) missing.push('odd')
   if (!ocr.market) missing.push('mercado')
 
-  const status = missing.length > 0 ? 'needs_review' : 'pending'
+  const status: 'pending' | 'needs_review' = missing.length > 0 ? 'needs_review' : 'pending'
 
   // Use stake % from signal image if provided, otherwise use settings default
   const stakePct = ocr.recommended_stake_pct ?? settings.stake_percentage
@@ -178,6 +178,9 @@ async function processImageSignal(
       status,
       recommended_stake_pct: ocr.recommended_stake_pct,
       is_multiple: ocr.is_multiple,
+      bookmaker: ocr.bookmaker ?? settings.preferred_bookmaker,
+      raw_text: rawText,
+      missing_fields: missing,
     },
     stake,
     stakePct,
@@ -219,7 +222,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
       return
     }
 
-    let result: Awaited<ReturnType<typeof processTextSignal>>
+    let result: Awaited<ReturnType<typeof processTextSignal>> | Awaited<ReturnType<typeof processImageSignal>>
 
     if (hasPhoto) {
       // Image signal
@@ -249,8 +252,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
     }
 
     console.log(`Signal saved | source: ${result.source} | status: ${result.signal.status} | ${result.signal.home_team} x ${result.signal.away_team} | odd: ${result.signal.odd}`)
-    const stakePct = 'stakePct' in result ? result.stakePct : settings.stake_percentage
-    await sendMessage(chatId, buildReply(result.replyData, result.stake, stakePct, result.source))
+    await sendMessage(chatId, buildReply(result.replyData, result.stake, result.stakePct, result.source))
 
   } catch (err) {
     console.error('Webhook error:', err)
