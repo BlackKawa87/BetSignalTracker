@@ -1,6 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const PROMPT = `Você é um extrator especializado em sinais de apostas esportivas do Telegram.
 
@@ -15,18 +15,18 @@ INSTRUÇÕES:
 
 Retorne APENAS um JSON com esta estrutura (null para não encontrado):
 {
-  "home_team": "time da casa ou null (use o primeiro time listado no cupom)",
-  "away_team": "time visitante ou null (segundo time no cupom)",
-  "market": "mercado selecionado completo (ex: Ambos Times Recebem Cartão Vermelho - Sim, 00:00-04:59 Lateral, Múltipla de 9)",
+  "home_team": "time da casa ou null",
+  "away_team": "time visitante ou null",
+  "market": "mercado selecionado completo",
   "selection": "Sim, Não, 1, X, 2 ou null",
   "odd": número_decimal_ou_null,
   "match_time": "horário do jogo (ex: 13:00) ou null",
   "match_date": "data do jogo (ex: 15 Jun) ou null",
   "competition": "competição/campeonato ou null",
   "bookmaker": "casa de apostas visível ou null",
-  "recommended_stake_pct": número_percentual_ou_null (extraia de '0.1%' → 0.1, '0.15%' → 0.15),
-  "is_multiple": true se for múltipla/acumulador, false se for simples,
-  "raw_text": "todo texto visível na imagem concatenado"
+  "recommended_stake_pct": número_ou_null (extraia de '0.1%' → 0.1, '0.15%' → 0.15),
+  "is_multiple": true se for múltipla/acumulador,
+  "raw_text": "todo texto visível na imagem"
 }
 
 Retorne SOMENTE o JSON, sem explicações nem markdown.`
@@ -47,19 +47,18 @@ export interface OcrResult {
 }
 
 export async function extractSignalFromImage(imageBase64: string, mediaType: string): Promise<OcrResult> {
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o',
     max_tokens: 1024,
     messages: [
       {
         role: 'user',
         content: [
           {
-            type: 'image',
-            source: {
-              type: 'base64',
-              media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-              data: imageBase64,
+            type: 'image_url',
+            image_url: {
+              url: `data:${mediaType};base64,${imageBase64}`,
+              detail: 'high',
             },
           },
           { type: 'text', text: PROMPT },
@@ -68,19 +67,15 @@ export async function extractSignalFromImage(imageBase64: string, mediaType: str
     ],
   })
 
-  const content = response.content[0]
-  if (content.type !== 'text') throw new Error('Unexpected response type from Claude')
-
-  const clean = content.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const text = response.choices[0]?.message?.content ?? ''
+  const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
   const parsed = JSON.parse(clean) as OcrResult
 
-  // Normalize odd — sometimes Claude returns string
   if (parsed.odd !== null) {
     parsed.odd = Math.round(Number(parsed.odd) * 100) / 100
     if (isNaN(parsed.odd) || parsed.odd < 1.01) parsed.odd = null
   }
 
-  // Normalize recommended_stake_pct
   if (parsed.recommended_stake_pct !== null) {
     parsed.recommended_stake_pct = Number(parsed.recommended_stake_pct)
     if (isNaN(parsed.recommended_stake_pct)) parsed.recommended_stake_pct = null

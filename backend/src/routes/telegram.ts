@@ -120,8 +120,8 @@ async function processImageSignal(
   settings: { current_bankroll: number; stake_percentage: number; preferred_bookmaker: string },
   messageId: number,
 ) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY not configured — cannot process image signals')
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not configured — cannot process image signals')
   }
 
   const { base64, mediaType } = await downloadPhotoAsBase64(photo.file_id)
