@@ -15,114 +15,142 @@ Plataforma pessoal para gestão de sinais de apostas esportivas recebidos pelo T
 
 ### 1. Banco de dados (Supabase)
 
-1. Acesse https://supabase.com/dashboard/project/azptefnlubhhaafcnddz
-2. Vá em **SQL Editor**
-3. Cole e execute o conteúdo de `supabase/schema.sql`
+1. Acesse o [SQL Editor](https://supabase.com/dashboard/project/azptefnlubhhaafcnddz/sql/new)
+2. Execute `supabase/schema.sql` para criar as tabelas
+3. Execute `supabase/migration_add_needs_review.sql` para adicionar o status `needs_review`
 
 ### 2. Frontend
 
 ```bash
 cd frontend
 cp .env.example .env
-# Edite .env com suas chaves do Supabase
+# Preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
 npm install
 npm run dev
 ```
 
-Variáveis necessárias no `.env`:
-```
-VITE_SUPABASE_URL=https://azptefnlubhhaafcnddz.supabase.co
-VITE_SUPABASE_ANON_KEY=<sua anon key do Supabase>
-```
-
-### 3. Backend (para integração Telegram)
+### 3. Backend (local)
 
 ```bash
 cd backend
 cp .env.example .env
-# Edite .env com suas chaves
+# Preencha todas as variáveis
 npm install
 npm run dev
 ```
 
-Variáveis necessárias no `.env`:
-```
-PORT=3001
-TELEGRAM_BOT_TOKEN=<token do seu bot>
-SUPABASE_URL=https://azptefnlubhhaafcnddz.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<service role key do Supabase>
-```
-
 ---
 
-## Configurando o Telegram Bot
+## Criando o bot no Telegram
 
-### Criar o bot
+### Passo 1 — Criar o bot
 1. Abra o Telegram e busque **@BotFather**
-2. Envie `/newbot` e siga as instruções
-3. Copie o token gerado
+2. Envie `/newbot`
+3. Escolha um nome (ex: `BetSignalTracker`)
+4. Escolha um username (deve terminar em `bot`, ex: `meus_sinais_bot`)
+5. Copie o **token** que o BotFather enviar
 
-### Configurar webhook (backend rodando em produção)
-
-```bash
-# Substitua pela URL pública do seu backend (ex: Railway, Render, etc.)
-curl -X POST http://localhost:3001/api/telegram/set-webhook \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://seu-backend.railway.app"}'
+### Passo 2 — Configurar o .env
+```env
+TELEGRAM_BOT_TOKEN=1234567890:AAHdqTcvCH1vGWJxfSeofSs0K67lz5Mjr-o
+PUBLIC_WEBHOOK_URL=https://betsignaltracker.vercel.app
+SUPABASE_URL=https://azptefnlubhhaafcnddz.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 ```
 
-### Fluxo de uso
-1. Você recebe um sinal em um canal/grupo do Telegram
-2. **Encaminha** a mensagem para o seu bot privado
-3. O bot processa e salva automaticamente no dashboard
+### Passo 3 — Configurar o webhook
 
-> ⚠️ O bot **não** acessa canais onde você não é admin. O fluxo correto é encaminhar o sinal manualmente para o seu bot.
+**Via browser** (mais fácil):
+```
+https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://betsignaltracker.vercel.app/api/telegram/webhook
+```
 
----
+**Via endpoint do próprio app** (após deploy):
+```
+https://betsignaltracker.vercel.app/api/telegram/set-webhook?url=https://betsignaltracker.vercel.app
+```
 
-## Funcionalidades
+**Verificar se está configurado:**
+```
+https://betsignaltracker.vercel.app/api/telegram/info
+```
 
-| Feature | Status |
-|---------|--------|
-| Dashboard com métricas | ✅ |
-| Gestão de banca automática | ✅ |
-| Parser de sinais (múltiplos formatos) | ✅ |
-| Cadastro manual de sinais | ✅ |
-| Marcar Green / Red / Void | ✅ |
-| Histórico com filtros | ✅ |
-| Estatísticas + gráficos | ✅ |
-| Webhook Telegram | ✅ |
-| Configurações de banca e stake | ✅ |
+### Passo 4 — Testar
 
----
+Encaminhe uma mensagem para o seu bot:
+```
+SINAL: Ambas Marcam SIM - Flamengo x Palmeiras - Odd 1.75
+```
 
-## Cálculo Financeiro
-
-**Green**: `lucro = stake × (odd - 1)` → banca aumenta
-
-**Red**: `prejuízo = stake` → banca diminui
-
-**Stake automática**: `(banca_atual × percentual_stake) / 100`
+O bot deve responder confirmando o registro e o sinal aparece no dashboard.
 
 ---
 
-## Estrutura do projeto
+## Variáveis de ambiente (Vercel)
+
+| Variável | Descrição |
+|---|---|
+| `VITE_SUPABASE_URL` | URL do projeto Supabase |
+| `VITE_SUPABASE_ANON_KEY` | Chave pública do Supabase (frontend) |
+| `SUPABASE_URL` | URL do projeto Supabase (backend) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Chave service_role do Supabase (backend) |
+| `TELEGRAM_BOT_TOKEN` | Token do bot criado no @BotFather |
+| `PUBLIC_WEBHOOK_URL` | URL pública do app (ex: https://betsignaltracker.vercel.app) |
+
+---
+
+## Fluxo de uso
+
+```
+Canal/grupo do Telegram
+        ↓
+  Você encaminha manualmente
+        ↓
+  Seu bot privado recebe
+        ↓
+  Webhook processa e salva no Supabase
+        ↓
+  Bot confirma: "✅ Sinal registrado!"
+        ↓
+  Dashboard atualiza automaticamente
+```
+
+> ⚠️ O sistema **nunca** tenta acessar canais privados automaticamente.
+> O encaminhamento é sempre manual, pelo usuário.
+
+---
+
+## Status dos sinais
+
+| Status | Descrição |
+|---|---|
+| `pending` | Sinal completo aguardando resultado |
+| `needs_review` | Sinal incompleto (faltou odd/times/mercado) — editar no dashboard |
+| `green` | Aposta ganha |
+| `red` | Aposta perdida |
+| `void` | Aposta anulada |
+
+---
+
+## Cálculo financeiro
+
+- **Green**: `lucro = stake × (odd - 1)` → banca sobe
+- **Red**: `prejuízo = stake` → banca desce
+- **Stake automática**: `banca_atual × percentual / 100`
+
+---
+
+## Estrutura
 
 ```
 BetSignalTracker/
-├── frontend/          # React + Vite + TailwindCSS
-│   ├── src/
-│   │   ├── components/
-│   │   ├── contexts/
-│   │   ├── pages/
-│   │   ├── types/
-│   │   └── utils/
-│   └── .env.example
-├── backend/           # Node.js + Express
-│   ├── src/
-│   │   ├── routes/
-│   │   └── utils/
-│   └── .env.example
-└── supabase/
-    └── schema.sql     # Execute no SQL Editor do Supabase
+├── frontend/              React + Vite + Tailwind
+├── backend/               Node.js + Express
+│   └── src/
+│       ├── routes/        telegram.ts, signals.ts
+│       └── utils/         supabase.ts, telegram.ts, signalParser.ts
+├── supabase/
+│   ├── schema.sql
+│   └── migration_add_needs_review.sql
+└── vercel.json
 ```
