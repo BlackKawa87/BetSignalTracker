@@ -6,6 +6,26 @@ function token(): string {
   return t
 }
 
+export async function downloadPhotoAsBase64(fileId: string): Promise<{ base64: string; mediaType: string }> {
+  const tk = token()
+
+  // Step 1: get file path from Telegram
+  const fileRes = await fetch(`${BASE}/bot${tk}/getFile?file_id=${fileId}`)
+  const fileData = await fileRes.json() as { ok: boolean; result: { file_path: string } }
+  if (!fileData.ok) throw new Error('Failed to get file info from Telegram')
+
+  const filePath = fileData.result.file_path
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? 'jpg'
+  const mediaType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+
+  // Step 2: download the actual file
+  const downloadRes = await fetch(`https://api.telegram.org/file/bot${tk}/${filePath}`)
+  const arrayBuffer = await downloadRes.arrayBuffer()
+  const base64 = Buffer.from(arrayBuffer).toString('base64')
+
+  return { base64, mediaType }
+}
+
 export async function sendMessage(chatId: number, text: string): Promise<void> {
   await fetch(`${BASE}/bot${token()}/sendMessage`, {
     method: 'POST',
