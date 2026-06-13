@@ -11,9 +11,15 @@ export function formatDate(dateString: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+  }).format(new Date(dateString))
+}
+
+export function formatDateShort(dateString: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
   }).format(new Date(dateString))
 }
 
@@ -25,6 +31,7 @@ export function calculateStats(signals: Signal[], settings: Settings): Dashboard
   const greens = signals.filter((s) => s.status === 'green')
   const reds = signals.filter((s) => s.status === 'red')
   const pending = signals.filter((s) => s.status === 'pending')
+  const needsReview = signals.filter((s) => s.status === 'needs_review')
   const settled = greens.length + reds.length
 
   const totalProfitLoss = signals.reduce((acc, s) => acc + (s.profit_loss ?? 0), 0)
@@ -46,10 +53,12 @@ export function calculateStats(signals: Signal[], settings: Settings): Dashboard
     greens: greens.length,
     reds: reds.length,
     pending: pending.length,
+    needsReview: needsReview.length,
     winRate,
     roi,
     totalProfitLoss,
     avgOdd,
+    currentStake: calculateStake(settings.current_bankroll, settings.stake_percentage),
   }
 }
 
@@ -63,45 +72,33 @@ export function calculateGreenProfit(stake: number, odd: number): number {
 
 export function getStatusColor(status: string): string {
   switch (status) {
-    case 'green':
-      return 'text-accent-green'
-    case 'red':
-      return 'text-accent-red'
-    case 'pending':
-      return 'text-accent-yellow'
-    case 'void':
-      return 'text-gray-400'
-    default:
-      return 'text-gray-400'
+    case 'green':        return 'text-accent-green'
+    case 'red':          return 'text-accent-red'
+    case 'pending':      return 'text-accent-yellow'
+    case 'needs_review': return 'text-orange-400'
+    case 'void':         return 'text-gray-400'
+    default:             return 'text-gray-400'
   }
 }
 
 export function getStatusBg(status: string): string {
   switch (status) {
-    case 'green':
-      return 'bg-accent-green/10 text-accent-green border border-accent-green/20'
-    case 'red':
-      return 'bg-accent-red/10 text-accent-red border border-accent-red/20'
-    case 'pending':
-      return 'bg-accent-yellow/10 text-accent-yellow border border-accent-yellow/20'
-    case 'void':
-      return 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
-    default:
-      return 'bg-gray-500/10 text-gray-400'
+    case 'green':        return 'bg-accent-green/10 text-accent-green border border-accent-green/20'
+    case 'red':          return 'bg-accent-red/10 text-accent-red border border-accent-red/20'
+    case 'pending':      return 'bg-accent-yellow/10 text-accent-yellow border border-accent-yellow/20'
+    case 'needs_review': return 'bg-orange-400/10 text-orange-400 border border-orange-400/20'
+    case 'void':         return 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+    default:             return 'bg-gray-500/10 text-gray-400'
   }
 }
 
 export function getStatusLabel(status: string): string {
   switch (status) {
-    case 'green':
-      return 'Green ✓'
-    case 'red':
-      return 'Red ✗'
-    case 'pending':
-      return 'Pendente'
-    case 'void':
-      return 'Void'
-    default:
-      return status
+    case 'green':        return 'Green ✓'
+    case 'red':          return 'Red ✗'
+    case 'pending':      return 'Pendente'
+    case 'needs_review': return 'Revisar'
+    case 'void':         return 'Void'
+    default:             return status
   }
 }

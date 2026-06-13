@@ -1,4 +1,4 @@
-export type SignalStatus = 'pending' | 'green' | 'red' | 'void'
+export type SignalStatus = 'pending' | 'needs_review' | 'green' | 'red' | 'void'
 
 export interface Signal {
   id: string
@@ -17,6 +17,7 @@ export interface Signal {
   raw_text: string
   telegram_message_id: number | null
   notes: string | null
+  updated_at: string
 }
 
 export interface Settings {
@@ -47,10 +48,12 @@ export interface DashboardStats {
   greens: number
   reds: number
   pending: number
+  needsReview: number
   winRate: number
   roi: number
   totalProfitLoss: number
   avgOdd: number
+  currentStake: number
 }
 
 export interface ParsedSignal {

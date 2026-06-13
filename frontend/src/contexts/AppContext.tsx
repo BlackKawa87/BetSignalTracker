@@ -18,13 +18,14 @@ interface AppContextValue {
   toasts: Toast[]
   showToast: (message: string, type?: Toast['type']) => void
   refreshSignals: () => Promise<void>
+  refreshAll: () => Promise<void>
   updateSettings: (data: Partial<Settings>) => Promise<void>
-  addSignal: (signal: Omit<Signal, 'id' | 'created_at'>) => Promise<void>
+  addSignal: (signal: Omit<Signal, 'id' | 'created_at' | 'updated_at'>) => Promise<void>
+  updateSignal: (id: string, data: Partial<Signal>) => Promise<void>
   markGreen: (signal: Signal) => Promise<void>
   markRed: (signal: Signal) => Promise<void>
   markVoid: (signal: Signal) => Promise<void>
   deleteSignal: (id: string) => Promise<void>
-  updateSignalNotes: (id: string, notes: string) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -75,7 +76,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase
       .from('signals')
       .select('*')
-      .order('created_at', { ascending: false })
+      .order('received_at', { ascending: false })
     if (!error && data) setSignals(data)
   }, [])
 
@@ -84,15 +85,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .from('bankroll_history')
       .select('*')
       .order('created_at', { ascending: true })
-      .limit(90)
+      .limit(120)
     if (!error && data) setBankrollHistory(data)
   }, [])
 
-  useEffect(() => {
-    Promise.all([loadSettings(), refreshSignals(), loadBankrollHistory()]).finally(() =>
-      setLoading(false),
-    )
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadSettings(), refreshSignals(), loadBankrollHistory()])
   }, [loadSettings, refreshSignals, loadBankrollHistory])
+
+  useEffect(() => {
+    refreshAll().finally(() => setLoading(false))
+  }, [refreshAll])
 
   const updateSettings = useCallback(
     async (data: Partial<Settings>) => {
@@ -114,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const addSignal = useCallback(
-    async (signal: Omit<Signal, 'id' | 'created_at'>) => {
+    async (signal: Omit<Signal, 'id' | 'created_at' | 'updated_at'>) => {
       const { error } = await supabase.from('signals').insert(signal)
       if (!error) {
         await refreshSignals()
@@ -126,30 +129,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [refreshSignals, showToast],
   )
 
+  const updateSignal = useCallback(
+    async (id: string, data: Partial<Signal>) => {
+      const { error } = await supabase
+        .from('signals')
+        .update({ ...data, updated_at: new Date().toISOString() })
+        .eq('id', id)
+      if (!error) {
+        setSignals((prev) => prev.map((s) => (s.id === id ? { ...s, ...data } : s)))
+        showToast('Sinal atualizado!', 'success')
+      } else {
+        showToast('Erro ao atualizar sinal', 'error')
+      }
+    },
+    [showToast],
+  )
+
   const markGreen = useCallback(
     async (signal: Signal) => {
-      if (!settings || signal.status !== 'pending') return
+      if (!settings) return
+      if (signal.status !== 'pending' && signal.status !== 'needs_review') return
+
       const odd = signal.odd ?? 2
       const profit = calculateGreenProfit(signal.stake, odd)
-      const newBankroll = settings.current_bankroll + profit
+      const newBankroll = Math.round((settings.current_bankroll + profit) * 100) / 100
 
       const { error } = await supabase
         .from('signals')
-        .update({ status: 'green', profit_loss: profit })
+        .update({ status: 'green', profit_loss: profit, updated_at: new Date().toISOString() })
         .eq('id', signal.id)
       if (error) { showToast('Erro ao marcar green', 'error'); return }
 
-      await supabase.from('settings').update({ current_bankroll: newBankroll, updated_at: new Date().toISOString() }).eq('id', settings.id)
-      await supabase.from('bankroll_history').insert({
-        bankroll: newBankroll,
-        change: profit,
-        reason: `Green: ${signal.home_team} x ${signal.away_team}`,
-        signal_id: signal.id,
-      })
+      await Promise.all([
+        supabase.from('settings').update({
+          current_bankroll: newBankroll,
+          updated_at: new Date().toISOString(),
+        }).eq('id', settings.id),
+        supabase.from('bankroll_history').insert({
+          bankroll: newBankroll,
+          change: profit,
+          reason: `Green: ${signal.home_team ?? '?'} x ${signal.away_team ?? '?'} | odd ${odd.toFixed(2)}`,
+          signal_id: signal.id,
+        }),
+      ])
 
       setSettings((prev) => prev ? { ...prev, current_bankroll: newBankroll } : prev)
-      await refreshSignals()
-      await loadBankrollHistory()
+      await Promise.all([refreshSignals(), loadBankrollHistory()])
       showToast(`Green! +${profit.toFixed(2)}`, 'success')
     },
     [settings, refreshSignals, loadBankrollHistory, showToast],
@@ -157,27 +182,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markRed = useCallback(
     async (signal: Signal) => {
-      if (!settings || signal.status !== 'pending') return
+      if (!settings) return
+      if (signal.status !== 'pending' && signal.status !== 'needs_review') return
+
       const loss = -signal.stake
-      const newBankroll = settings.current_bankroll + loss
+      const newBankroll = Math.round((settings.current_bankroll + loss) * 100) / 100
 
       const { error } = await supabase
         .from('signals')
-        .update({ status: 'red', profit_loss: loss })
+        .update({ status: 'red', profit_loss: loss, updated_at: new Date().toISOString() })
         .eq('id', signal.id)
       if (error) { showToast('Erro ao marcar red', 'error'); return }
 
-      await supabase.from('settings').update({ current_bankroll: newBankroll, updated_at: new Date().toISOString() }).eq('id', settings.id)
-      await supabase.from('bankroll_history').insert({
-        bankroll: newBankroll,
-        change: loss,
-        reason: `Red: ${signal.home_team} x ${signal.away_team}`,
-        signal_id: signal.id,
-      })
+      await Promise.all([
+        supabase.from('settings').update({
+          current_bankroll: newBankroll,
+          updated_at: new Date().toISOString(),
+        }).eq('id', settings.id),
+        supabase.from('bankroll_history').insert({
+          bankroll: newBankroll,
+          change: loss,
+          reason: `Red: ${signal.home_team ?? '?'} x ${signal.away_team ?? '?'} | odd ${(signal.odd ?? 0).toFixed(2)}`,
+          signal_id: signal.id,
+        }),
+      ])
 
       setSettings((prev) => prev ? { ...prev, current_bankroll: newBankroll } : prev)
-      await refreshSignals()
-      await loadBankrollHistory()
+      await Promise.all([refreshSignals(), loadBankrollHistory()])
       showToast(`Red. -${signal.stake.toFixed(2)}`, 'error')
     },
     [settings, refreshSignals, loadBankrollHistory, showToast],
@@ -187,7 +218,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (signal: Signal) => {
       const { error } = await supabase
         .from('signals')
-        .update({ status: 'void', profit_loss: 0 })
+        .update({ status: 'void', profit_loss: 0, updated_at: new Date().toISOString() })
         .eq('id', signal.id)
       if (!error) {
         await refreshSignals()
@@ -208,18 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [showToast],
   )
 
-  const updateSignalNotes = useCallback(
-    async (id: string, notes: string) => {
-      const { error } = await supabase.from('signals').update({ notes }).eq('id', id)
-      if (!error) {
-        setSignals((prev) => prev.map((s) => (s.id === id ? { ...s, notes } : s)))
-      }
-    },
-    [],
-  )
-
-  const stats =
-    settings && signals.length >= 0 ? calculateStats(signals, settings) : null
+  const stats = settings ? calculateStats(signals, settings) : null
 
   return (
     <AppContext.Provider
@@ -232,13 +252,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toasts,
         showToast,
         refreshSignals,
+        refreshAll,
         updateSettings,
         addSignal,
+        updateSignal,
         markGreen,
         markRed,
         markVoid,
         deleteSignal,
-        updateSignalNotes,
       }}
     >
       {children}
