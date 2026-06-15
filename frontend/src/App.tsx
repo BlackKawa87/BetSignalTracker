@@ -7,6 +7,10 @@ import { History } from './pages/History'
 import { Stats } from './pages/Stats'
 import { SettingsPage } from './pages/Settings'
 import { AutoClosePage } from './pages/AutoClose'
+import { AnalyticsPage } from './pages/Analytics'
+import { ReviewPage } from './pages/Review'
+import { SystemStatusPage } from './pages/SystemStatus'
+import { TestLabPage } from './pages/TestLab'
 
 function Layout() {
   return (
@@ -19,6 +23,10 @@ function Layout() {
             <Route path="/historico"   element={<History />} />
             <Route path="/estatisticas" element={<Stats />} />
             <Route path="/auto-close"  element={<AutoClosePage />} />
+            <Route path="/analytics"   element={<AnalyticsPage />} />
+            <Route path="/revisao"        element={<ReviewPage />} />
+            <Route path="/system-status"  element={<SystemStatusPage />} />
+            <Route path="/test-lab"       element={<TestLabPage />} />
             <Route path="/configuracoes" element={<SettingsPage />} />
           </Routes>
         </div>

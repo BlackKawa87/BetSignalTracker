@@ -1,13 +1,16 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, History, BarChart2, Settings, Zap, Bot } from 'lucide-react'
+import { LayoutDashboard, History, BarChart2, Settings, Zap, Bot, TrendingUp, AlertTriangle, Activity, FlaskConical } from 'lucide-react'
 import { useApp } from '../../contexts/AppContext'
 import { formatCurrency } from '../../utils/helpers'
 
-const NAV = [
-  { to: '/',              label: 'Dashboard',     icon: LayoutDashboard, end: true  },
-  { to: '/historico',     label: 'Histórico',     icon: History,         end: false },
-  { to: '/estatisticas',  label: 'Estatísticas',  icon: BarChart2,       end: false },
-  { to: '/auto-close',    label: 'Auto-Close',    icon: Bot,             end: false },
+const STATIC_NAV = [
+  { to: '/',              label: 'Dashboard',    icon: LayoutDashboard, end: true  },
+  { to: '/historico',     label: 'Histórico',    icon: History,         end: false },
+  { to: '/estatisticas',  label: 'Estatísticas', icon: BarChart2,       end: false },
+  { to: '/analytics',     label: 'Analytics',    icon: TrendingUp,      end: false },
+  { to: '/auto-close',    label: 'Auto-Close',   icon: Bot,             end: false },
+  { to: '/system-status', label: 'Sistema',       icon: Activity,        end: false },
+  { to: '/test-lab',      label: 'Test Lab',      icon: FlaskConical,    end: false },
   { to: '/configuracoes', label: 'Configurações', icon: Settings,        end: false },
 ]
 
@@ -44,7 +47,27 @@ export function Sidebar() {
       )}
 
       <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {NAV.map(({ to, label, icon: Icon, end }) => (
+        {/* Revisão — shown first with live badge when signals need review */}
+        {stats && stats.needsReview > 0 && (
+          <NavLink
+            to="/revisao"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                isActive
+                  ? 'bg-orange-400/10 text-orange-400 border border-orange-400/20'
+                  : 'text-orange-400/70 hover:text-orange-400 hover:bg-orange-400/5 border border-orange-400/15'
+              }`
+            }
+          >
+            <AlertTriangle size={15} />
+            <span className="flex-1">Revisão</span>
+            <span className="text-[10px] font-mono font-bold bg-orange-400/20 text-orange-400 px-1.5 py-0.5 rounded-full">
+              {stats.needsReview}
+            </span>
+          </NavLink>
+        )}
+
+        {STATIC_NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

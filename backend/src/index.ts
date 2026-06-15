@@ -4,41 +4,50 @@ import cors from 'cors'
 import telegramRouter  from './routes/telegram'
 import signalsRouter   from './routes/signals'
 import autocloseRouter from './routes/autoclose'
+import parseRouter     from './routes/parse'
+import healthRouter    from './routes/health'
+import demoRouter      from './routes/demo'
+import testRouter      from './routes/test'
+import { rateLimit }   from './middleware/rateLimiter'
+import { logger }      from './utils/logger'
 
 const app  = express()
 const PORT = process.env.PORT ?? 3001
 
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '5mb' }))
 
-// Health check
-// Vercel strips /api prefix: /api/health (external) → /health (Express)
-app.get('/health', (_req, res) =>
-  res.json({ status: 'ok', timestamp: new Date().toISOString() }),
-)
+// Global rate limit: 120 req/min per IP
+app.use(rateLimit(120))
 
-// Vercel cron job endpoint (declared in vercel.json as /api/cron/autoclose)
-// Vercel strips /api → /cron/autoclose in Express
+// Vercel strips /api prefix: /api/health → /health
+app.use('/health', healthRouter)
+
+// Vercel cron job: /api/cron/autoclose → /cron/autoclose in Express
 app.get('/cron/autoclose', async (_req, res) => {
   const { processPendingSignals } = await import('./services/signalAutoClose')
   try {
+    logger.info('Cron', 'Auto-close job started')
     const stats = await processPendingSignals()
+    logger.info('Cron', `Auto-close finished`, stats)
     res.json({ ok: true, stats })
   } catch (err) {
-    console.error('[cron] autoclose error:', err)
+    logger.error('Cron', 'Auto-close job failed', String(err))
     res.status(500).json({ ok: false, error: String(err) })
   }
 })
 
-// Routes
-app.use('/telegram',  telegramRouter)
+// Routes — stricter rate limit on parse (AI cost)
+app.use('/telegram',  rateLimit(30),  telegramRouter)
 app.use('/signals',   signalsRouter)
-app.use('/autoclose', autocloseRouter)
+app.use('/autoclose', rateLimit(20),  autocloseRouter)
+app.use('/parse',     rateLimit(15),  parseRouter)
+app.use('/demo',      demoRouter)
+app.use('/test',      rateLimit(30),  testRouter)
 
 app.listen(PORT, () => {
-  console.log(`BetSignalTracker backend running on port ${PORT}`)
-  console.log(`  Webhook:      POST /api/telegram/webhook`)
-  console.log(`  Set webhook:  GET  /api/telegram/set-webhook?url=https://yourdomain.com`)
-  console.log(`  Auto-close:   POST /api/autoclose/run`)
-  console.log(`  Cron route:   GET  /api/cron/autoclose`)
+  logger.info('Server', `BetSignalTracker backend running on port ${PORT}`)
+  logger.info('Server', `Webhook secret: ${process.env.TELEGRAM_WEBHOOK_SECRET ? 'configured ✓' : 'not configured (open)'}`)
+  logger.info('Server', `OpenAI:         ${process.env.OPENAI_API_KEY ? 'configured ✓' : 'not configured'}`)
+  logger.info('Server', `Sports API:     ${process.env.SPORTS_API_KEY ? 'configured ✓' : 'not configured'}`)
 })

@@ -1,5 +1,27 @@
 export type SignalStatus = 'pending' | 'needs_review' | 'green' | 'red' | 'void'
 
+export type MarketCategory =
+  | 'Result'
+  | 'Both Teams To Score'
+  | 'Over Under'
+  | 'Handicap'
+  | 'Double Chance'
+  | 'Team Total Goals'
+  | 'Corners'
+  | 'Race to Corners'
+  | 'Cards'
+  | 'Player Shots'
+  | 'Player Shots On Target'
+  | 'Bet Builder'
+  | 'Time Window'
+  | 'Other'
+
+export interface BetLeg {
+  market: string
+  selection: string
+  line: string | null
+}
+
 export interface Signal {
   id: string
   created_at: string
@@ -7,6 +29,14 @@ export interface Signal {
   home_team: string | null
   away_team: string | null
   market: string | null
+  market_category: MarketCategory | null
+  selection: string | null
+  period: string | null
+  line: string | null
+  team: string | null
+  player: string | null
+  is_bet_builder: boolean | null
+  legs: BetLeg[] | null
   odd: number | null
   competition: string | null
   bookmaker: string | null
@@ -15,9 +45,55 @@ export interface Signal {
   status: SignalStatus
   profit_loss: number | null
   raw_text: string
+  ai_raw_json: string | null
+  image_url: string | null
   telegram_message_id: number | null
   notes: string | null
+  confidence_score: number | null
   updated_at: string
+}
+
+export interface AIParseResult {
+  home_team: string | null
+  away_team: string | null
+  market: string | null
+  odd: number | null
+  competition: string | null
+  bookmaker: string | null
+  match_time: string | null
+  is_multiple: boolean
+  stake_pct: number | null
+  confidence_score: number
+  teams_confidence: number
+  odd_confidence: number
+  market_confidence: number
+  reasoning: string
+  status: 'pending' | 'needs_review'
+  missing_fields: string[]
+}
+
+// Result from POST /api/parse/image
+export interface ImagePick {
+  market_category: MarketCategory | null
+  market_name: string | null
+  match: string | null
+  competition: string | null
+  team: string | null
+  player: string | null
+  line: string | null
+  period: string | null
+  selection: string | null
+  odd: number | null
+  is_bet_builder: boolean
+  legs: BetLeg[]
+  confidence_score: number
+  raw_description: string | null
+}
+
+export interface ImageParseResult {
+  picks: ImagePick[]
+  raw_ai_json: string
+  parse_error?: string
 }
 
 export interface Settings {
