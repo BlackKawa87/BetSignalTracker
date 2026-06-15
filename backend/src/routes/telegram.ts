@@ -18,6 +18,12 @@ function confidenceLabel(score: number): string {
 
 type ReplySource = 'text' | 'image' | 'image_with_caption' | 'document_image'
 
+interface LegSummary {
+  label: string   // "Antonee Robinson - Mais de 60.5"
+  match: string   // "EUA vs Austrália"
+  odd: number | null
+}
+
 function buildReply(
   data: {
     home_team?: string | null
@@ -32,6 +38,7 @@ function buildReply(
     picks_count?: number
     confidence_score?: number
     reasoning?: string
+    legs_summary?: LegSummary[]
   },
   stake: number,
   stakePct: number,
@@ -50,26 +57,36 @@ function buildReply(
     )
   }
 
-  const game = data.is_multiple
-    ? (data.market ?? 'Múltipla')   // Dupla / Tripla / Múltipla
-    : `${data.home_team ?? '?'} x ${data.away_team ?? '?'}`
-
-  const accIcon = data.is_multiple ? '🎰 ' : ''
+  const accLabel = data.market ?? 'Múltipla'   // Dupla / Tripla / Múltipla / Simples
 
   const lines = [
     `✅ <b>Sinal registrado!</b> ${icon}`,
     ``,
-    `⚽ <b>${accIcon}${game}</b>`,
-    `🎯 Odd: ${Number(data.odd).toFixed(2)}`,
-    `💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`,
   ]
+
+  if (data.is_multiple && data.legs_summary && data.legs_summary.length > 0) {
+    // Accumulator: show type + each leg
+    lines.push(`🎰 <b>${accLabel}</b> — Odd total: ${Number(data.odd).toFixed(2)}`)
+    lines.push(``)
+    data.legs_summary.forEach((leg, i) => {
+      const oddStr = leg.odd ? ` @ ${leg.odd.toFixed(2)}` : ''
+      lines.push(`${i + 1}. <b>${leg.label}</b>${oddStr}`)
+      lines.push(`   📍 ${leg.match}`)
+    })
+    lines.push(``)
+    lines.push(`💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`)
+  } else {
+    // Single bet
+    lines.push(`⚽ <b>${data.home_team ?? '?'} x ${data.away_team ?? '?'}</b>`)
+    if (data.market) lines.push(`📊 Mercado: ${data.market}`)
+    lines.push(`🎯 Odd: ${Number(data.odd).toFixed(2)}`)
+    lines.push(`💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`)
+    if (data.competition) lines.push(`🏆 ${data.competition}`)
+    if (data.match_time)  lines.push(`🕐 ${data.match_time}`)
+  }
+
   if (data.stake_percentage_from_signal) {
     lines.push(`📌 Stake tipster: ${data.stake_percentage_from_signal}%`)
-  }
-  if (data.competition) lines.push(`🏆 ${data.competition}`)
-  if (data.match_time)  lines.push(`🕐 ${data.match_time}`)
-  if (data.picks_count && data.picks_count > 1) {
-    lines.push(`📋 ${data.picks_count} apostas detectadas na imagem`)
   }
   if (data.confidence_score !== undefined && data.confidence_score < 90) {
     lines.push(`\n${confidenceLabel(data.confidence_score)}`)
@@ -285,9 +302,18 @@ async function processImageSignal(
       is_multiple:                  isAccumulator,
       picks_count:                  parsed.picks.length,
       confidence_score:             avgConf,
-      reasoning:                    isAccumulator
-        ? `${accType} com ${parsed.picks.length} apostas — Odd total: ${effectiveOdd}`
-        : missing.length > 0 ? `Campos ausentes: ${missing.join(', ')}` : undefined,
+      reasoning:                    !isAccumulator && missing.length > 0
+        ? `Campos ausentes: ${missing.join(', ')}`
+        : undefined,
+      legs_summary: isAccumulator
+        ? parsed.picks.map((p) => ({
+            label: p.player
+              ? `${p.player} — ${p.market_name ?? p.market_category ?? 'Mercado'}`
+              : (p.market_name ?? p.market_category ?? 'Mercado'),
+            match: p.match ?? '?',
+            odd:   p.odd,
+          }))
+        : undefined,
     },
     stake,
     stakePct,
