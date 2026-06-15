@@ -29,6 +29,8 @@ function buildReply(
     home_team?: string | null
     away_team?: string | null
     market?: string | null
+    selection?: string | null
+    line?: string | null
     odd?: number | null
     competition?: string | null
     match_time?: string | null
@@ -79,7 +81,12 @@ function buildReply(
     // Single bet
     lines.push(`⚽ <b>${data.home_team ?? '?'} x ${data.away_team ?? '?'}</b>`)
     if (data.market) lines.push(`📊 Mercado: ${data.market}`)
-    lines.push(`🎯 Odd: ${Number(data.odd).toFixed(2)}`)
+    // Selection: "Mais de 2.5", "Sim", "Home", etc.
+    const selLabel = data.line
+      ? `${data.selection ?? ''} ${data.line}`.trim()
+      : data.selection
+    if (selLabel) lines.push(`🎯 Aposta: <b>${selLabel}</b>`)
+    lines.push(`💹 Odd: ${Number(data.odd).toFixed(2)}`)
     lines.push(`💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`)
     if (data.competition) lines.push(`🏆 ${data.competition}`)
     if (data.match_time)  lines.push(`🕐 ${data.match_time}`)
@@ -294,6 +301,8 @@ async function processImageSignal(
       home_team:                    isAccumulator ? null : fields.home_team,
       away_team:                    isAccumulator ? null : fields.away_team,
       market:                       marketLabel,
+      selection:                    isAccumulator ? null : fields.selection,
+      line:                         isAccumulator ? null : fields.line,
       odd:                          effectiveOdd,
       competition:                  isAccumulator ? null : fields.competition,
       match_time:                   null,
