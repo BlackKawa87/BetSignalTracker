@@ -51,14 +51,15 @@ function buildReply(
   }
 
   const game = data.is_multiple
-    ? '🎰 Múltipla'
+    ? (data.market ?? 'Múltipla')   // Dupla / Tripla / Múltipla
     : `${data.home_team ?? '?'} x ${data.away_team ?? '?'}`
+
+  const accIcon = data.is_multiple ? '🎰 ' : ''
 
   const lines = [
     `✅ <b>Sinal registrado!</b> ${icon}`,
     ``,
-    `⚽ <b>${game}</b>`,
-    `📊 Mercado: ${data.market ?? '?'}`,
+    `⚽ <b>${accIcon}${game}</b>`,
     `🎯 Odd: ${Number(data.odd).toFixed(2)}`,
     `💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`,
   ]
