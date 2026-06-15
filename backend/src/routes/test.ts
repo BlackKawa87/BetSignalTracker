@@ -1,11 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { supabase } from '../utils/supabase'
 import { parseSignalWithAI } from '../services/aiSignalParser'
+import { parseImageWithAI } from '../services/imageSignalParser'
+import { extractTelegramSignalPayload, TelegramUpdate } from '../utils/telegramPayload'
 import { logger } from '../utils/logger'
 
 const router = Router()
 
-// ── Guard: only accessible in dev OR when ALLOW_TEST_ENDPOINTS=true ──────────
+// ── Guard: dev or ALLOW_TEST_ENDPOINTS=true ───────────────────────────────────
 
 function testGuard(_req: Request, res: Response, next: NextFunction): void {
   const isProd    = process.env.NODE_ENV === 'production'
@@ -13,7 +15,7 @@ function testGuard(_req: Request, res: Response, next: NextFunction): void {
   if (isProd && !isAllowed) {
     res.status(403).json({
       error: 'Test endpoints are disabled in production',
-      hint: 'Set ALLOW_TEST_ENDPOINTS=true in Vercel env vars to enable',
+      hint:  'Set ALLOW_TEST_ENDPOINTS=true in Vercel env vars to enable',
     })
     return
   }
@@ -33,8 +35,111 @@ const PRESET_SIGNALS: Record<string, string> = {
   under:   'Under 2.5 gols | Atletico Madrid x Sevilla | Odd 1.80',
 }
 
+// ── POST /test/telegram-raw ───────────────────────────────────────────────────
+// Paste a real Telegram update JSON — see exactly what the system detects,
+// downloads, and parses without saving anything to DB.
+
+router.post('/telegram-raw', async (req: Request, res: Response) => {
+  const start = Date.now()
+
+  let update: TelegramUpdate
+  try {
+    update = (req.body?.update ?? req.body) as TelegramUpdate
+    if (!update || typeof update.update_id !== 'number') {
+      res.status(400).json({
+        error: 'Body must be a valid Telegram update object with update_id',
+        hint:  'Paste the raw JSON from the Telegram webhook directly',
+      })
+      return
+    }
+  } catch {
+    res.status(400).json({ error: 'Invalid JSON body' })
+    return
+  }
+
+  logger.info('TelegramRawDebug', `Received update_id=${update.update_id}`)
+
+  // Step 1: extract payload (attempts image download if photo/doc present)
+  const payload = await extractTelegramSignalPayload(update).catch((err) => ({
+    source_type:      'unknown' as const,
+    text:             null,
+    caption:          null,
+    image_base64:     null,
+    mime_type:        null,
+    telegram_file_id: null,
+    image_bytes:      null,
+    forwarded_from:   null,
+    media_group_id:   null,
+    chat_id:          0,
+    message_id:       0,
+    update_id:        update.update_id,
+    detected: {
+      has_text: false, has_caption: false,
+      has_photo: false, has_document: false,
+      is_forwarded: false, document_mime: null,
+    },
+    download_error: String(err),
+  }))
+
+  const out: Record<string, unknown> = {
+    // Detection results
+    source_type:      payload.source_type,
+    detected:         payload.detected,
+    // Message metadata
+    chat_id:          payload.chat_id,
+    message_id:       payload.message_id,
+    update_id:        payload.update_id,
+    forwarded_from:   payload.forwarded_from,
+    media_group_id:   payload.media_group_id,
+    // Content
+    text:             payload.text,
+    caption:          payload.caption,
+    // Image download result
+    telegram_file_id: payload.telegram_file_id,
+    image_bytes:      payload.image_bytes,
+    mime_type:        payload.mime_type,
+    has_image:        !!payload.image_base64,
+    download_error:   payload.download_error ?? null,
+    // Parse result (filled below)
+    parse_result:     null as unknown,
+    parse_error:      null as unknown,
+    elapsed_ms:       0,
+  }
+
+  // Step 2: parse content
+  if (payload.source_type === 'text' && payload.text) {
+    try {
+      const parsed = await parseSignalWithAI(payload.text)
+      out.parse_result = parsed
+    } catch (err) {
+      out.parse_error = String(err)
+    }
+  } else if (payload.image_base64 && payload.mime_type) {
+    try {
+      const parsed = await parseImageWithAI(
+        payload.image_base64,
+        payload.mime_type,
+        payload.caption ?? undefined,
+      )
+      out.parse_result = {
+        picks_count:         parsed.picks.length,
+        picks:               parsed.picks,
+        parse_error:         parsed.parse_error ?? null,
+        raw_ai_json_preview: parsed.raw_ai_json.slice(0, 800),
+        raw_ai_json_full:    parsed.raw_ai_json,
+      }
+    } catch (err) {
+      out.parse_error = String(err)
+    }
+  } else {
+    out.parse_error = 'Nothing to parse — no text and no downloadable image'
+  }
+
+  out.elapsed_ms = Date.now() - start
+  res.json(out)
+})
+
 // ── POST /test/telegram-update ────────────────────────────────────────────────
-// Simulate a Telegram text update without actually sending a Telegram message.
 
 router.post('/telegram-update', async (req: Request, res: Response) => {
   const { text, preset } = req.body as { text?: string; preset?: string }
@@ -44,7 +149,6 @@ router.post('/telegram-update', async (req: Request, res: Response) => {
   logger.info('Test', `Simulating Telegram update: "${signalText.slice(0, 60)}"`)
 
   try {
-    // Load settings
     const { data: settings, error: settingsErr } = await supabase
       .from('settings')
       .select('id, current_bankroll, stake_percentage, preferred_bookmaker')
@@ -57,10 +161,9 @@ router.post('/telegram-update', async (req: Request, res: Response) => {
       return
     }
 
-    // Parse with AI
-    const parsed = await parseSignalWithAI(signalText)
+    const parsed   = await parseSignalWithAI(signalText)
     const stakePct = parsed.stake_pct ?? settings.stake_percentage
-    const stake = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+    const stake    = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
 
     const notes: string[] = ['[TEST]']
     if (parsed.missing_fields.length > 0) notes.push(`Revisão: ${parsed.missing_fields.join(', ')}`)
@@ -79,6 +182,7 @@ router.post('/telegram-update', async (req: Request, res: Response) => {
       status:              parsed.status,
       profit_loss:         null,
       raw_text:            signalText,
+      source_type:         'text',
       telegram_message_id: null,
       confidence_score:    parsed.confidence_score,
       notes:               notes.join(' | '),
@@ -96,22 +200,22 @@ router.post('/telegram-update', async (req: Request, res: Response) => {
     }
 
     const elapsed = Date.now() - start
-    logger.info('Test', `Telegram simulation completed in ${elapsed}ms | signal_id=${inserted?.id}`)
+    logger.info('Test', `Done in ${elapsed}ms | signal_id=${inserted?.id}`)
 
     res.json({
-      ok: true,
+      ok:         true,
       elapsed_ms: elapsed,
-      signal_id: inserted?.id,
+      signal_id:  inserted?.id,
       parsed: {
-        home_team:       parsed.home_team,
-        away_team:       parsed.away_team,
-        market:          parsed.market,
-        odd:             parsed.odd,
-        competition:     parsed.competition,
+        home_team:        parsed.home_team,
+        away_team:        parsed.away_team,
+        market:           parsed.market,
+        odd:              parsed.odd,
+        competition:      parsed.competition,
         confidence_score: parsed.confidence_score,
-        status:          parsed.status,
-        missing_fields:  parsed.missing_fields,
-        reasoning:       parsed.reasoning,
+        status:           parsed.status,
+        missing_fields:   parsed.missing_fields,
+        reasoning:        parsed.reasoning,
       },
       stake,
       stakePct,
@@ -123,14 +227,13 @@ router.post('/telegram-update', async (req: Request, res: Response) => {
 })
 
 // ── POST /test/full-flow ──────────────────────────────────────────────────────
-// Complete E2E: parse → save → mark green → update bankroll → cleanup
 
 router.post('/full-flow', async (req: Request, res: Response) => {
-  const TEXT = req.body?.text as string | undefined
+  const TEXT       = req.body?.text as string | undefined
   const signalText = TEXT?.trim() || PRESET_SIGNALS.btts
 
   const report: Array<{ step: string; ok: boolean; elapsed: number; detail?: string }> = []
-  let signalId: string | null = null
+  let signalId:         string | null = null
   let originalBankroll: number | null = null
 
   function step(name: string, ok: boolean, elapsed: number, detail?: string) {
@@ -141,7 +244,6 @@ router.post('/full-flow', async (req: Request, res: Response) => {
   const overallStart = Date.now()
 
   try {
-    // ── Step 1: Load settings ──────────────────────────────────
     let s0 = Date.now()
     const { data: settings, error: settErr } = await supabase
       .from('settings')
@@ -151,34 +253,31 @@ router.post('/full-flow', async (req: Request, res: Response) => {
       .single()
 
     if (settErr || !settings) {
-      step('Load settings', false, Date.now() - s0, settErr?.message ?? 'No settings found')
+      step('Load settings', false, Date.now() - s0, settErr?.message ?? 'No settings')
       res.status(500).json({ ok: false, report })
       return
     }
     originalBankroll = settings.current_bankroll
     step('Load settings', true, Date.now() - s0, `bankroll=${settings.current_bankroll} stake=${settings.stake_percentage}%`)
 
-    // ── Step 2: AI Parse ───────────────────────────────────────
     s0 = Date.now()
     let parsed
     try {
       parsed = await parseSignalWithAI(signalText)
       step('AI Parser', true, Date.now() - s0,
-        `conf=${parsed.confidence_score}% ${parsed.home_team ?? '?'} x ${parsed.away_team ?? '?'} | ${parsed.market ?? '?'} @ ${parsed.odd}`)
+        `conf=${parsed.confidence_score}% "${parsed.home_team ?? '?'} x ${parsed.away_team ?? '?'}" | ${parsed.market ?? '?'} @ ${parsed.odd}`)
     } catch (e) {
       step('AI Parser', false, Date.now() - s0, String(e))
       res.status(500).json({ ok: false, report })
       return
     }
 
-    // ── Step 3: Calculate stake ────────────────────────────────
     s0 = Date.now()
     const stakePct = parsed.stake_pct ?? settings.stake_percentage
-    const stake = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
-    const odd   = parsed.odd ?? 2.0
+    const stake    = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+    const odd      = parsed.odd ?? 2.0
     step('Stake calculation', true, Date.now() - s0, `R$${stake} (${stakePct}% of R$${settings.current_bankroll})`)
 
-    // ── Step 4: Insert signal ──────────────────────────────────
     s0 = Date.now()
     const { data: inserted, error: insertErr } = await supabase
       .from('signals')
@@ -195,6 +294,7 @@ router.post('/full-flow', async (req: Request, res: Response) => {
         status:              'pending',
         profit_loss:         null,
         raw_text:            signalText,
+        source_type:         'text',
         telegram_message_id: null,
         confidence_score:    parsed.confidence_score,
         notes:               '[TEST][FULL-FLOW]',
@@ -210,31 +310,24 @@ router.post('/full-flow', async (req: Request, res: Response) => {
     signalId = inserted.id
     step('Insert signal', true, Date.now() - s0, `id=${signalId}`)
 
-    // ── Step 5: Mark green ─────────────────────────────────────
     s0 = Date.now()
     const profit      = Math.round(stake * (odd - 1) * 100) / 100
     const newBankroll = Math.round((settings.current_bankroll + profit) * 100) / 100
-
     const { error: greenErr } = await supabase
       .from('signals')
       .update({ status: 'green', profit_loss: profit, updated_at: new Date().toISOString() })
       .eq('id', signalId)
+    step('Mark green', !greenErr, Date.now() - s0,
+      greenErr?.message ?? `profit=+R$${profit} | new_bankroll=R$${newBankroll}`)
 
-    if (greenErr) {
-      step('Mark green', false, Date.now() - s0, greenErr.message)
-    } else {
-      step('Mark green', true, Date.now() - s0, `profit=+R$${profit} | new_bankroll=R$${newBankroll}`)
-    }
-
-    // ── Step 6: Update bankroll ────────────────────────────────
     s0 = Date.now()
     const { error: bkErr } = await supabase
       .from('settings')
       .update({ current_bankroll: newBankroll, updated_at: new Date().toISOString() })
       .eq('id', settings.id)
-    step('Update bankroll', !bkErr, Date.now() - s0, bkErr?.message ?? `R$${settings.current_bankroll} → R$${newBankroll}`)
+    step('Update bankroll', !bkErr, Date.now() - s0,
+      bkErr?.message ?? `R$${settings.current_bankroll} → R$${newBankroll}`)
 
-    // ── Step 7: Insert bankroll_history ────────────────────────
     s0 = Date.now()
     const { error: histErr } = await supabase
       .from('bankroll_history')
@@ -246,19 +339,16 @@ router.post('/full-flow', async (req: Request, res: Response) => {
       })
     step('Bankroll history', !histErr, Date.now() - s0, histErr?.message)
 
-    // ── Step 8: Verify records in DB ───────────────────────────
     s0 = Date.now()
     const { data: verify } = await supabase
       .from('signals')
       .select('id, status, profit_loss, confidence_score')
       .eq('id', signalId)
       .single()
-
     const verifyOk = verify?.status === 'green' && verify.profit_loss === profit
     step('Verify DB records', verifyOk, Date.now() - s0,
-      `status=${verify?.status} profit=${verify?.profit_loss} confidence=${verify?.confidence_score}%`)
+      `status=${verify?.status} profit=${verify?.profit_loss} conf=${verify?.confidence_score}%`)
 
-    // ── Step 9: Cleanup — restore bankroll & delete test signal ─
     s0 = Date.now()
     const [cleanSignal, cleanBankroll] = await Promise.all([
       supabase.from('signals').delete().eq('id', signalId),
@@ -271,34 +361,27 @@ router.post('/full-flow', async (req: Request, res: Response) => {
     step('Cleanup', cleanOk, Date.now() - s0,
       cleanOk ? `Signal deleted, bankroll restored to R$${originalBankroll}` : 'Partial cleanup error')
 
-    const totalElapsed = Date.now() - overallStart
-    const allPassed    = report.every((r) => r.ok)
-
     res.json({
-      ok: allPassed,
-      total_elapsed_ms: totalElapsed,
-      steps_passed:  report.filter((r) => r.ok).length,
-      steps_failed:  report.filter((r) => !r.ok).length,
+      ok:               report.every((r) => r.ok),
+      total_elapsed_ms: Date.now() - overallStart,
+      steps_passed:     report.filter((r) => r.ok).length,
+      steps_failed:     report.filter((r) => !r.ok).length,
       report,
     })
   } catch (err) {
-    // Emergency cleanup
     try {
-      if (signalId) {
-        await supabase.from('signals').delete().eq('id', signalId)
-      }
+      if (signalId) await supabase.from('signals').delete().eq('id', signalId)
       if (originalBankroll !== null) {
         const { data: s } = await supabase.from('settings').select('id').limit(1).single()
         if (s) await supabase.from('settings').update({ current_bankroll: originalBankroll }).eq('id', s.id)
       }
-    } catch { /* best-effort cleanup */ }
-    logger.error('Test', 'Full-flow test crashed', String(err))
+    } catch { /* best-effort */ }
+    logger.error('Test', 'Full-flow crashed', String(err))
     res.status(500).json({ ok: false, error: String(err), report })
   }
 })
 
-// ── GET /test/parser ──────────────────────────────────────────────────────────
-// Quick parser test — no Supabase write
+// ── POST /test/parser ─────────────────────────────────────────────────────────
 
 router.post('/parser', async (req: Request, res: Response) => {
   const { text, preset } = req.body as { text?: string; preset?: string }
@@ -319,7 +402,6 @@ router.get('/presets', (_req: Request, res: Response) => {
 })
 
 // ── GET /test/supabase ────────────────────────────────────────────────────────
-// Quick Supabase connectivity test
 
 router.get('/supabase', async (_req: Request, res: Response) => {
   const start = Date.now()
@@ -329,9 +411,9 @@ router.get('/supabase', async (_req: Request, res: Response) => {
       supabase.from('settings').select('id').limit(1).single(),
     ])
     res.json({
-      ok: !sigResult.error && !settResult.error,
-      elapsed_ms: Date.now() - start,
-      signals_count: sigResult.count,
+      ok:              !sigResult.error && !settResult.error,
+      elapsed_ms:      Date.now() - start,
+      signals_count:   sigResult.count,
       settings_exists: !!settResult.data,
       errors: {
         signals:  sigResult.error?.message,

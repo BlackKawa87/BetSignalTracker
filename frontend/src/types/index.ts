@@ -22,6 +22,13 @@ export interface BetLeg {
   line: string | null
 }
 
+export type TelegramSourceType =
+  | 'text'
+  | 'image'
+  | 'image_with_caption'
+  | 'document_image'
+  | 'unknown'
+
 export interface Signal {
   id: string
   created_at: string
@@ -45,8 +52,13 @@ export interface Signal {
   status: SignalStatus
   profit_loss: number | null
   raw_text: string
+  caption_text: string | null
   ai_raw_json: string | null
   image_url: string | null
+  telegram_file_id: string | null
+  source_type: TelegramSourceType | null
+  forwarded_from: string | null
+  stake_percentage_from_signal: number | null
   telegram_message_id: number | null
   notes: string | null
   confidence_score: number | null

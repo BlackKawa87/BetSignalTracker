@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import {
   Play, CheckCircle, XCircle, Loader2, AlertCircle,
   FlaskConical, RefreshCw, ChevronDown, ChevronUp, Send,
-  Bot, Shield, Zap, Database,
+  Bot, Shield, Zap, Database, Bug,
 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 
@@ -352,6 +352,227 @@ const CAT_META: Record<string, { label: string; icon: React.ReactNode }> = {
   e2e:      { label: 'Fluxo E2E',         icon: <FlaskConical size={13} /> },
 }
 
+// ── Telegram Raw Debug panel ──────────────────────────────────────────────────
+
+const EXAMPLE_UPDATE = JSON.stringify({
+  update_id: 123456789,
+  message: {
+    message_id: 42,
+    from: { id: 111, username: 'tipster_vip' },
+    chat: { id: 999, type: 'private' },
+    date: 1718400000,
+    photo: [
+      { file_id: 'AgACAgIAAxk...', file_unique_id: 'abc', width: 320, height: 240, file_size: 12000 },
+      { file_id: 'AgACAgIAAxk...LARGE', file_unique_id: 'xyz', width: 1280, height: 960, file_size: 98000 },
+    ],
+    caption: '1.5% ✅ Odd 1.67',
+    forward_from_chat: { id: -1001234567890, type: 'channel', title: 'VIP Sinais' },
+    forward_date: 1718399900,
+  },
+}, null, 2)
+
+interface RawDebugResult {
+  source_type: string
+  detected: {
+    has_text: boolean
+    has_caption: boolean
+    has_photo: boolean
+    has_document: boolean
+    is_forwarded: boolean
+    document_mime: string | null
+  }
+  text: string | null
+  caption: string | null
+  telegram_file_id: string | null
+  image_bytes: number | null
+  mime_type: string | null
+  has_image: boolean
+  forwarded_from: string | null
+  media_group_id: string | null
+  download_error: string | null
+  parse_error: string | null
+  parse_result: {
+    picks_count?: number
+    picks?: unknown[]
+    parse_error?: string | null
+    raw_ai_json_preview?: string
+  } | Record<string, unknown> | null
+  elapsed_ms: number
+}
+
+function TelegramRawDebugPanel() {
+  const [json,      setJson]      = useState(EXAMPLE_UPDATE)
+  const [loading,   setLoading]   = useState(false)
+  const [result,    setResult]    = useState<RawDebugResult | null>(null)
+  const [parseErr,  setParseErr]  = useState<string | null>(null)
+  const [jsonError, setJsonError] = useState<string | null>(null)
+
+  const run = useCallback(async () => {
+    setJsonError(null)
+    let body: unknown
+    try {
+      body = JSON.parse(json)
+    } catch (e) {
+      setJsonError(`JSON inválido: ${String(e)}`)
+      return
+    }
+    setLoading(true)
+    setResult(null)
+    setParseErr(null)
+    try {
+      const r    = await fetch('/api/test/telegram-raw', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      })
+      const data = await r.json() as RawDebugResult
+      setResult(data)
+    } catch (err) {
+      setParseErr(String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [json])
+
+  const sourceColor = (t: string) =>
+    t === 'image_with_caption' ? 'text-purple-400' :
+    t === 'image'              ? 'text-blue-400'   :
+    t === 'document_image'     ? 'text-cyan-400'   :
+    t === 'text'               ? 'text-accent-green' :
+    'text-gray-500'
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <Bug size={14} className="text-orange-400" />
+        <p className="text-sm font-semibold text-gray-300">Telegram Raw Debug</p>
+        <span className="text-[10px] text-gray-600 font-mono ml-auto">POST /api/test/telegram-raw</span>
+      </div>
+      <p className="text-[11px] text-gray-500">
+        Cole aqui o JSON bruto de um update do Telegram para ver exatamente o que o sistema lê,
+        baixa e parseia — sem salvar no banco.
+      </p>
+
+      <textarea
+        value={json}
+        onChange={(e) => { setJson(e.target.value); setJsonError(null) }}
+        rows={10}
+        spellCheck={false}
+        className="w-full bg-dark-900 border border-dark-500 rounded-lg px-3 py-2 text-xs text-gray-300 font-mono placeholder-gray-600 focus:outline-none focus:border-orange-500/50 resize-y"
+        placeholder='{"update_id": 123, "message": {...}}'
+      />
+
+      {jsonError && (
+        <p className="text-[11px] text-accent-red font-mono">{jsonError}</p>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={run}
+          disabled={loading || !json.trim()}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-sm font-medium hover:bg-orange-500/20 transition-colors disabled:opacity-50"
+        >
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <Bug size={14} />}
+          Analisar Update
+        </button>
+        <button
+          onClick={() => setJson(EXAMPLE_UPDATE)}
+          className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors"
+        >
+          Carregar exemplo
+        </button>
+      </div>
+
+      {parseErr && (
+        <div className="p-3 rounded-lg bg-accent-red/10 border border-accent-red/20">
+          <p className="text-xs text-accent-red font-mono">{parseErr}</p>
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-3 text-[11px] font-mono">
+          {/* Source type */}
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-dark-900 border border-dark-600">
+            <span className="text-gray-500">source_type</span>
+            <span className={`font-semibold ${sourceColor(result.source_type)}`}>
+              {result.source_type}
+            </span>
+            <span className="ml-auto text-gray-600">{result.elapsed_ms}ms</span>
+          </div>
+
+          {/* Detection grid */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {Object.entries(result.detected).map(([k, v]) => (
+              <div key={k} className={`flex items-center gap-1.5 px-2 py-1.5 rounded border ${
+                v === true  ? 'border-accent-green/30 bg-accent-green/5 text-accent-green' :
+                v === false ? 'border-dark-600 text-gray-600' :
+                'border-dark-600 text-gray-500'
+              }`}>
+                {v === true  ? <CheckCircle size={10} /> :
+                 v === false ? <XCircle     size={10} /> :
+                 <span className="w-[10px]" />}
+                <span>{k.replace(/_/g, ' ')}</span>
+                {v !== true && v !== false && v != null && (
+                  <span className="text-gray-400 ml-auto">{String(v)}</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Fields */}
+          <div className="space-y-1">
+            {([
+              ['forwarded_from',   result.forwarded_from],
+              ['caption',          result.caption],
+              ['text',             result.text],
+              ['telegram_file_id', result.telegram_file_id],
+              ['image_bytes',      result.image_bytes != null ? `${result.image_bytes.toLocaleString()} bytes` : null],
+              ['mime_type',        result.mime_type],
+              ['media_group_id',   result.media_group_id],
+              ['download_error',   result.download_error],
+            ] as [string, string | number | null][]).filter(([, v]) => v != null).map(([k, v]) => (
+              <div key={k} className="flex gap-2 px-2 py-1 rounded bg-dark-900">
+                <span className="text-gray-600 min-w-[130px]">{k}</span>
+                <span className={k === 'download_error' ? 'text-accent-red' : 'text-gray-300'}>
+                  {String(v)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Parse result */}
+          {result.parse_error && (
+            <div className="p-2 rounded bg-accent-red/10 border border-accent-red/20">
+              <span className="text-accent-red">parse_error: {result.parse_error}</span>
+            </div>
+          )}
+
+          {result.parse_result && (
+            <div className="space-y-2">
+              {'picks_count' in result.parse_result && (
+                <div className="flex items-center gap-2 px-2 py-1 rounded bg-accent-green/5 border border-accent-green/20">
+                  <CheckCircle size={11} className="text-accent-green" />
+                  <span className="text-accent-green">
+                    {(result.parse_result as { picks_count: number }).picks_count} aposta(s) extraída(s)
+                  </span>
+                </div>
+              )}
+              <details className="group">
+                <summary className="cursor-pointer text-gray-600 hover:text-gray-400 select-none">
+                  Resultado completo ▶
+                </summary>
+                <pre className="mt-1 text-[10px] text-gray-500 bg-dark-900 rounded p-2 overflow-x-auto max-h-80">
+                  {JSON.stringify(result.parse_result, null, 2)}
+                </pre>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function TestLabPage() {
@@ -602,6 +823,9 @@ export function TestLabPage() {
           )
         })}
       </div>
+
+      {/* Telegram Raw Debug */}
+      <TelegramRawDebugPanel />
 
       {/* Info footer */}
       <Card className="p-4">

@@ -1,50 +1,22 @@
 import { Router, Request, Response } from 'express'
 import { supabase } from '../utils/supabase'
-import { sendMessage, setWebhook, getWebhookInfo, downloadPhotoAsBase64 } from '../utils/telegram'
+import { sendMessage, setWebhook, getWebhookInfo } from '../utils/telegram'
+import { extractTelegramSignalPayload, TelegramUpdate } from '../utils/telegramPayload'
 import { parseSignalWithAI } from '../services/aiSignalParser'
 import { parseImageWithAI, pickToSignalFields } from '../services/imageSignalParser'
 import { logger } from '../utils/logger'
 
 const router = Router()
 
-// ── Telegram types ────────────────────────────────────────────────────────────
-
-interface PhotoSize {
-  file_id: string
-  width: number
-  height: number
-  file_size?: number
-}
-
-interface TelegramMessage {
-  message_id: number
-  from?: { id: number; username?: string; first_name?: string }
-  chat: { id: number; type: string }
-  text?: string
-  caption?: string
-  photo?: PhotoSize[]
-  forward_date?: number
-  forward_from?: { id: number }
-  forward_from_chat?: { id: number; title?: string }
-}
-
-interface TelegramUpdate {
-  update_id: number
-  message?: TelegramMessage
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getLargestPhoto(photos: PhotoSize[]): PhotoSize {
-  return photos.reduce((best, p) => (p.file_size ?? 0) > (best.file_size ?? 0) ? p : best)
-}
+// ── Reply builder ─────────────────────────────────────────────────────────────
 
 function confidenceLabel(score: number): string {
-  if (score >= 90) return `✅ Confiança: ${score}%`
   if (score >= 80) return `✅ Confiança: ${score}%`
   if (score >= 60) return `⚠️ Confiança parcial: ${score}%`
   return `⚠️ Confiança baixa: ${score}%`
 }
+
+type ReplySource = 'text' | 'image' | 'image_with_caption' | 'document_image'
 
 function buildReply(
   data: {
@@ -55,19 +27,22 @@ function buildReply(
     competition?: string | null
     match_time?: string | null
     status: string
-    recommended_stake_pct?: number | null
+    stake_percentage_from_signal?: number | null
     is_multiple?: boolean
+    picks_count?: number
     confidence_score?: number
     reasoning?: string
   },
   stake: number,
   stakePct: number,
-  source: 'text' | 'image',
+  source: ReplySource,
 ): string {
-  const icon = source === 'image' ? '🖼️' : '📨'
+  const icon =
+    source === 'text'               ? '📨' :
+    source === 'image_with_caption' ? '🖼️💬' : '🖼️'
 
   if (data.status === 'needs_review') {
-    const conf = data.confidence_score !== undefined ? `\nConfiança: ${data.confidence_score}%` : ''
+    const conf   = data.confidence_score !== undefined ? `\nConfiança: ${data.confidence_score}%` : ''
     const reason = data.reasoning ? `\n💡 ${data.reasoning}` : ''
     return (
       `⚠️ <b>Sinal salvo para revisão</b> ${icon}${conf}${reason}\n\n` +
@@ -75,66 +50,103 @@ function buildReply(
     )
   }
 
-  const isMultiple = data.is_multiple
-  const game = isMultiple ? '🎰 Múltipla' : `${data.home_team} x ${data.away_team}`
+  const game = data.is_multiple
+    ? '🎰 Múltipla'
+    : `${data.home_team ?? '?'} x ${data.away_team ?? '?'}`
 
   const lines = [
     `✅ <b>Sinal registrado!</b> ${icon}`,
     ``,
     `⚽ <b>${game}</b>`,
-    `📊 Mercado: ${data.market}`,
+    `📊 Mercado: ${data.market ?? '?'}`,
     `🎯 Odd: ${Number(data.odd).toFixed(2)}`,
     `💰 Stake: R$ ${stake.toFixed(2)} (${stakePct}%)`,
   ]
-  if (data.recommended_stake_pct) lines.push(`📌 Stake tipster: ${data.recommended_stake_pct}%`)
+  if (data.stake_percentage_from_signal) {
+    lines.push(`📌 Stake tipster: ${data.stake_percentage_from_signal}%`)
+  }
   if (data.competition) lines.push(`🏆 ${data.competition}`)
-  if (data.match_time) lines.push(`🕐 ${data.match_time}`)
+  if (data.match_time)  lines.push(`🕐 ${data.match_time}`)
+  if (data.picks_count && data.picks_count > 1) {
+    lines.push(`📋 ${data.picks_count} apostas detectadas na imagem`)
+  }
   if (data.confidence_score !== undefined && data.confidence_score < 90) {
     lines.push(`\n${confidenceLabel(data.confidence_score)}`)
   }
-
   return lines.join('\n')
 }
 
-// ── Process text signal (AI parser) ──────────────────────────────────────────
+// ── Load settings ─────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  const { data, error } = await supabase
+    .from('settings')
+    .select('id, current_bankroll, stake_percentage, preferred_bookmaker')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single()
+  if (error || !data) throw new Error('Settings not found — configure bankroll in dashboard first')
+  return data
+}
+
+// ── Process text signal ───────────────────────────────────────────────────────
 
 async function processTextSignal(
   text: string,
   settings: { current_bankroll: number; stake_percentage: number; preferred_bookmaker: string },
   messageId: number,
+  extra: { forwarded_from?: string | null; source_type?: string },
 ) {
-  const parsed = await parseSignalWithAI(text)
+  const parsed   = await parseSignalWithAI(text)
   const stakePct = parsed.stake_pct ?? settings.stake_percentage
-  const stake = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+  const stake    = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+
+  logger.info('TextSignal', [
+    `conf=${parsed.confidence_score}%`,
+    `status=${parsed.status}`,
+    `market=${parsed.market ?? 'null'}`,
+    `odd=${parsed.odd ?? 'null'}`,
+    `teams="${parsed.home_team ?? '?'} x ${parsed.away_team ?? '?'}"`,
+  ].join(' | '))
 
   const notes: string[] = []
   if (parsed.missing_fields.length > 0) notes.push(`Revisão: ${parsed.missing_fields.join(', ')}`)
   if (parsed.reasoning && parsed.confidence_score < 80) notes.push(`IA: ${parsed.reasoning}`)
-  if (parsed.is_multiple) notes.push('Múltipla')
+  if (parsed.is_multiple)    notes.push('Múltipla')
+  if (extra.forwarded_from)  notes.push(`Fwd: ${extra.forwarded_from}`)
 
   return {
     signal: {
-      received_at: new Date().toISOString(),
-      home_team: parsed.home_team,
-      away_team: parsed.away_team,
-      market: parsed.market,
-      odd: parsed.odd,
-      competition: parsed.competition,
-      bookmaker: parsed.bookmaker ?? settings.preferred_bookmaker,
-      match_time: parsed.match_time,
+      received_at:          new Date().toISOString(),
+      home_team:            parsed.home_team,
+      away_team:            parsed.away_team,
+      market:               parsed.market,
+      odd:                  parsed.odd,
+      competition:          parsed.competition,
+      bookmaker:            parsed.bookmaker ?? settings.preferred_bookmaker,
+      match_time:           parsed.match_time,
       stake,
-      status: parsed.status,
-      profit_loss: null,
-      raw_text: text,
-      telegram_message_id: messageId,
-      confidence_score: parsed.confidence_score,
-      notes: notes.length > 0 ? notes.join(' | ') : null,
+      status:               parsed.status,
+      profit_loss:          null,
+      raw_text:             text,
+      source_type:          extra.source_type ?? 'text',
+      forwarded_from:       extra.forwarded_from ?? null,
+      telegram_message_id:  messageId,
+      confidence_score:     parsed.confidence_score,
+      notes:                notes.length > 0 ? notes.join(' | ') : null,
     },
     replyData: {
-      ...parsed,
-      recommended_stake_pct: parsed.stake_pct,
-      confidence_score: parsed.confidence_score,
-      reasoning: parsed.reasoning,
+      home_team:                    parsed.home_team,
+      away_team:                    parsed.away_team,
+      market:                       parsed.market,
+      odd:                          parsed.odd,
+      competition:                  parsed.competition,
+      match_time:                   parsed.match_time,
+      status:                       parsed.status,
+      stake_percentage_from_signal: parsed.stake_pct,
+      is_multiple:                  parsed.is_multiple,
+      confidence_score:             parsed.confidence_score,
+      reasoning:                    parsed.reasoning,
     },
     stake,
     stakePct,
@@ -142,87 +154,112 @@ async function processTextSignal(
   }
 }
 
-// ── Process image signal (GPT-4o Vision structured parser) ───────────────────
+// ── Process image signal ──────────────────────────────────────────────────────
 
 async function processImageSignal(
-  photo: PhotoSize,
-  caption: string | undefined,
+  imageBase64: string,
+  mimeType: string,
   settings: { current_bankroll: number; stake_percentage: number; preferred_bookmaker: string },
   messageId: number,
+  extra: {
+    caption?:          string | null
+    telegram_file_id?: string | null
+    source_type?:      string
+    forwarded_from?:   string | null
+  },
 ) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY not configured — cannot process image signals')
   }
 
-  const { base64, mediaType } = await downloadPhotoAsBase64(photo.file_id)
-  const parsed = await parseImageWithAI(base64, mediaType)
+  const captionText = extra.caption ?? undefined
+  const parsed      = await parseImageWithAI(imageBase64, mimeType, captionText)
+
+  logger.info('ImageSignal', `AI raw (first 300 chars): ${parsed.raw_ai_json.slice(0, 300)}`)
 
   if (parsed.parse_error || parsed.picks.length === 0) {
     throw new Error(parsed.parse_error ?? 'Nenhuma aposta encontrada na imagem')
   }
 
-  const rawText = caption || '[imagem]'
-  const stakePct = settings.stake_percentage
-  const stake = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
-
-  // Use the first (or only) pick as the primary signal
-  const pick = parsed.picks[0]
+  const pick   = parsed.picks[0]
   const fields = pickToSignalFields(pick)
 
   const missing: string[] = []
   if (!fields.home_team && !fields.away_team) missing.push('times')
-  if (!fields.odd) missing.push('odd')
+  if (!fields.odd)    missing.push('odd')
   if (!fields.market) missing.push('mercado')
 
   const confidence_score = fields.confidence_score
   const status: 'pending' | 'needs_review' =
     missing.length > 0 || confidence_score < 80 ? 'needs_review' : 'pending'
 
+  // Prefer tipster stake from AI, fall back to settings
+  const stakePct = fields.stake_percentage_from_signal ?? settings.stake_percentage
+  const stake    = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
+
+  logger.info('ImageSignal', [
+    `conf=${confidence_score}%`,
+    `status=${status}`,
+    `market=${fields.market ?? 'null'}`,
+    `odd=${fields.odd ?? 'null'}`,
+    `teams="${fields.home_team ?? '?'} x ${fields.away_team ?? '?'}"`,
+    `stake_pct=${stakePct}%`,
+    `picks_total=${parsed.picks.length}`,
+  ].join(' | '))
+
   const notes: string[] = []
-  if (missing.length > 0) notes.push(`Revisão: ${missing.join(', ')}`)
-  if (parsed.picks.length > 1) notes.push(`Múltiplas apostas na imagem: ${parsed.picks.length}`)
-  if (fields.is_bet_builder) notes.push('Bet Builder')
+  if (missing.length > 0)         notes.push(`Revisão: ${missing.join(', ')}`)
+  if (parsed.picks.length > 1)    notes.push(`${parsed.picks.length} apostas na imagem`)
+  if (fields.is_bet_builder)      notes.push('Bet Builder')
+  if (extra.forwarded_from)       notes.push(`Fwd: ${extra.forwarded_from}`)
+
+  const rawText = captionText
+    ? `[imagem] ${captionText}`
+    : '[imagem]'
 
   return {
     signal: {
-      received_at: new Date().toISOString(),
-      home_team: fields.home_team,
-      away_team: fields.away_team,
-      market: fields.market,
-      market_category: fields.market_category,
-      selection: fields.selection,
-      period: fields.period,
-      line: fields.line,
-      team: fields.team,
-      player: fields.player,
-      is_bet_builder: fields.is_bet_builder,
-      legs: fields.legs.length > 0 ? fields.legs : null,
-      odd: fields.odd,
-      competition: fields.competition,
-      bookmaker: settings.preferred_bookmaker,
-      match_time: null,
+      received_at:                  new Date().toISOString(),
+      home_team:                    fields.home_team,
+      away_team:                    fields.away_team,
+      market:                       fields.market,
+      market_category:              fields.market_category,
+      selection:                    fields.selection,
+      period:                       fields.period,
+      line:                         fields.line,
+      team:                         fields.team,
+      player:                       fields.player,
+      is_bet_builder:               fields.is_bet_builder,
+      legs:                         fields.legs.length > 0 ? fields.legs : null,
+      odd:                          fields.odd,
+      competition:                  fields.competition,
+      bookmaker:                    settings.preferred_bookmaker,
+      match_time:                   null,
       stake,
       status,
-      profit_loss: null,
-      raw_text: rawText,
-      ai_raw_json: parsed.raw_ai_json,
-      telegram_message_id: messageId,
+      profit_loss:                  null,
+      raw_text:                     rawText,
+      caption_text:                 captionText ?? null,
+      ai_raw_json:                  parsed.raw_ai_json,
+      telegram_file_id:             extra.telegram_file_id ?? null,
+      source_type:                  extra.source_type ?? 'image',
+      forwarded_from:               extra.forwarded_from ?? null,
+      stake_percentage_from_signal: fields.stake_percentage_from_signal,
+      telegram_message_id:          messageId,
       confidence_score,
-      notes: notes.length > 0 ? notes.join(' | ') : null,
+      notes:                        notes.length > 0 ? notes.join(' | ') : null,
     },
     replyData: {
-      home_team: fields.home_team,
-      away_team: fields.away_team,
-      market: fields.market,
-      odd: fields.odd,
-      competition: fields.competition,
-      match_time: null,
+      home_team:                    fields.home_team,
+      away_team:                    fields.away_team,
+      market:                       fields.market,
+      odd:                          fields.odd,
+      competition:                  fields.competition,
+      match_time:                   null,
       status,
-      recommended_stake_pct: null,
-      is_multiple: parsed.picks.length > 1,
-      bookmaker: settings.preferred_bookmaker,
-      raw_text: rawText,
-      missing_fields: missing,
+      stake_percentage_from_signal: fields.stake_percentage_from_signal,
+      is_multiple:                  parsed.picks.length > 1,
+      picks_count:                  parsed.picks.length,
       confidence_score,
       reasoning: missing.length > 0
         ? `Campos ausentes: ${missing.join(', ')}`
@@ -230,88 +267,115 @@ async function processImageSignal(
     },
     stake,
     stakePct,
-    source: 'image' as const,
+    source: (extra.source_type ?? 'image') as ReplySource,
   }
 }
 
 // ── Webhook ───────────────────────────────────────────────────────────────────
 
 router.post('/webhook', async (req: Request, res: Response) => {
-  // Validate webhook secret if configured
   const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET
   if (webhookSecret) {
     const incoming = req.headers['x-telegram-bot-api-secret-token']
     if (incoming !== webhookSecret) {
-      logger.warning('Webhook', `Invalid secret token from ${req.ip} — rejected`)
+      logger.warning('Webhook', `Invalid secret from ${req.ip}`)
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
   }
 
+  // Respond immediately — Telegram retries if we don't
   res.status(200).json({ ok: true })
 
   try {
-    const update: TelegramUpdate = req.body
-    const message = update?.message
-    if (!message) return
+    const update = req.body as TelegramUpdate
+    logger.info('Webhook', `update_id=${update.update_id}`)
 
-    const chatId = message.chat.id
-    const hasText = !!message.text?.trim()
-    const hasPhoto = !!message.photo?.length
+    // Extract payload — downloads image if present
+    const payload = await extractTelegramSignalPayload(update)
 
-    logger.info('Webhook', `Received update_id=${update.update_id} hasText=${hasText} hasPhoto=${hasPhoto}`)
+    logger.info('Webhook', [
+      `source_type=${payload.source_type}`,
+      `chat=${payload.chat_id}`,
+      `fwd="${payload.forwarded_from ?? '-'}"`,
+      `file_id=${payload.telegram_file_id ?? '-'}`,
+      `bytes=${payload.image_bytes ?? '-'}`,
+      `caption=${payload.caption ? `"${payload.caption.slice(0, 50)}"` : 'none'}`,
+      `download_error=${payload.download_error ?? 'none'}`,
+    ].join(' | '))
 
-    if (!hasText && !hasPhoto) return
-    if (hasText && message.text!.trim().startsWith('/')) return
+    if (payload.source_type === 'unknown') return
 
-    const { data: settings, error: settingsError } = await supabase
-      .from('settings')
-      .select('id, current_bankroll, stake_percentage, preferred_bookmaker')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single()
+    const chatId = payload.chat_id
 
-    if (settingsError || !settings) {
-      logger.error('Webhook', 'Settings not found', settingsError?.message)
-      await sendMessage(chatId, '❌ Configure a banca no dashboard primeiro.')
+    // Skip bot commands
+    if (payload.text?.startsWith('/')) return
+    if (!payload.text && !payload.image_base64) {
+      if (payload.download_error) {
+        await sendMessage(chatId,
+          `❌ Erro ao baixar imagem: ${payload.download_error}\n\nEnvie o sinal em texto também.`,
+        )
+      }
       return
     }
 
+    const settings = await loadSettings().catch(async (err) => {
+      await sendMessage(chatId, '❌ Configure a banca no dashboard primeiro.')
+      throw err
+    })
+
     let result: Awaited<ReturnType<typeof processTextSignal>> | Awaited<ReturnType<typeof processImageSignal>>
 
-    if (hasPhoto) {
-      const photo = getLargestPhoto(message.photo!)
-      await sendMessage(chatId, '🔍 Analisando imagem com IA...')
-      try {
-        result = await processImageSignal(photo, message.caption, settings, message.message_id)
-      } catch (ocrErr) {
-        logger.error('Webhook', 'OCR image processing failed', String(ocrErr))
-        await sendMessage(chatId, `❌ Erro ao ler imagem: ${String(ocrErr)}\n\nEnvie o sinal em texto também.`)
-        return
-      }
-    } else {
-      const text = (message.text ?? message.caption)!.trim()
+    if (payload.source_type === 'text') {
+      const text = payload.text!
       if (text.length < 5) return
       await sendMessage(chatId, '🤖 Analisando sinal com IA...')
-      result = await processTextSignal(text, settings, message.message_id)
+      result = await processTextSignal(text, settings, payload.message_id, {
+        forwarded_from: payload.forwarded_from,
+        source_type:    'text',
+      })
+    } else {
+      await sendMessage(chatId, '🔍 Analisando imagem com IA...')
+      try {
+        result = await processImageSignal(
+          payload.image_base64!,
+          payload.mime_type ?? 'image/jpeg',
+          settings,
+          payload.message_id,
+          {
+            caption:          payload.caption,
+            telegram_file_id: payload.telegram_file_id,
+            source_type:      payload.source_type,
+            forwarded_from:   payload.forwarded_from,
+          },
+        )
+      } catch (imgErr) {
+        logger.error('Webhook', 'Image processing failed', String(imgErr))
+        await sendMessage(chatId,
+          `❌ Erro ao ler imagem: ${String(imgErr)}\n\nEnvie o sinal em texto também.`,
+        )
+        return
+      }
     }
 
     const { error: insertError } = await supabase.from('signals').insert(result.signal)
-
     if (insertError) {
       logger.error('Webhook', 'Supabase insert failed', insertError.message)
       await sendMessage(chatId, `❌ Erro ao salvar: ${insertError.message}`)
       return
     }
 
-    const conf = (result.signal as { confidence_score?: number }).confidence_score ?? 0
-    console.log(
-      `Signal saved | source:${result.source} | status:${result.signal.status}` +
-      ` | confidence:${conf}% | ${result.signal.home_team ?? 'múltipla'} x ${result.signal.away_team ?? '—'}` +
-      ` | odd:${result.signal.odd}`,
-    )
+    logger.info('Webhook', [
+      `Signal saved`,
+      `source=${result.source}`,
+      `status=${result.signal.status}`,
+      `conf=${(result.signal as { confidence_score?: number }).confidence_score ?? '?'}%`,
+    ].join(' | '))
 
-    await sendMessage(chatId, buildReply(result.replyData, result.stake, result.stakePct, result.source))
+    await sendMessage(
+      chatId,
+      buildReply(result.replyData, result.stake, result.stakePct, result.source as ReplySource),
+    )
 
   } catch (err) {
     logger.critical('Webhook', 'Unhandled webhook error', String(err))
