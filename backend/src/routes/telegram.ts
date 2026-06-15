@@ -271,6 +271,129 @@ async function processImageSignal(
   }
 }
 
+// ── Resilient insert (falls back to baseline columns if migration not run) ────
+
+const BASELINE_COLUMNS = new Set([
+  'received_at', 'home_team', 'away_team', 'market', 'odd', 'competition',
+  'bookmaker', 'match_time', 'stake', 'status', 'profit_loss', 'raw_text',
+  'telegram_message_id', 'confidence_score', 'notes',
+])
+
+async function insertSignal(signal: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from('signals').insert(signal)
+  if (!error) return
+
+  const isColumnError =
+    error.message.includes('column') ||
+    error.code === '42703' ||
+    error.message.includes('does not exist')
+
+  if (isColumnError) {
+    logger.warning('Webhook', `Column error — retrying with baseline schema. ${error.message}`)
+    const baseline: Record<string, unknown> = {}
+    for (const key of BASELINE_COLUMNS) {
+      if (key in signal) baseline[key] = signal[key]
+    }
+    const { error: fallbackError } = await supabase.from('signals').insert(baseline)
+    if (fallbackError) throw new Error(`Baseline insert failed: ${fallbackError.message}`)
+    logger.info('Webhook', 'Signal saved with baseline schema (run migrations to enable all fields)')
+    return
+  }
+
+  throw new Error(error.message)
+}
+
+// ── Core update handler ───────────────────────────────────────────────────────
+
+async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  logger.info('Webhook', `update_id=${update.update_id}`)
+
+  const payload = await extractTelegramSignalPayload(update)
+
+  logger.info('Webhook', [
+    `source_type=${payload.source_type}`,
+    `chat=${payload.chat_id}`,
+    `fwd="${payload.forwarded_from ?? '-'}"`,
+    `file_id=${payload.telegram_file_id ?? '-'}`,
+    `bytes=${payload.image_bytes ?? '-'}`,
+    `caption=${payload.caption ? `"${payload.caption.slice(0, 50)}"` : 'none'}`,
+    `download_error=${payload.download_error ?? 'none'}`,
+  ].join(' | '))
+
+  if (payload.source_type === 'unknown') return
+
+  const chatId = payload.chat_id
+
+  if (payload.text?.startsWith('/')) return
+  if (!payload.text && !payload.image_base64) {
+    if (payload.download_error) {
+      await sendMessage(chatId,
+        `❌ Erro ao baixar imagem: ${payload.download_error}\n\nEnvie o sinal em texto também.`,
+      )
+    }
+    return
+  }
+
+  const settings = await loadSettings().catch(async (err) => {
+    await sendMessage(chatId, '❌ Configure a banca no dashboard primeiro.')
+    throw err
+  })
+
+  let result: Awaited<ReturnType<typeof processTextSignal>> | Awaited<ReturnType<typeof processImageSignal>>
+
+  if (payload.source_type === 'text') {
+    const text = payload.text!
+    if (text.length < 5) return
+    await sendMessage(chatId, '🤖 Analisando sinal com IA...')
+    result = await processTextSignal(text, settings, payload.message_id, {
+      forwarded_from: payload.forwarded_from,
+      source_type:    'text',
+    })
+  } else {
+    await sendMessage(chatId, '🔍 Analisando imagem com IA...')
+    try {
+      result = await processImageSignal(
+        payload.image_base64!,
+        payload.mime_type ?? 'image/jpeg',
+        settings,
+        payload.message_id,
+        {
+          caption:          payload.caption,
+          telegram_file_id: payload.telegram_file_id,
+          source_type:      payload.source_type,
+          forwarded_from:   payload.forwarded_from,
+        },
+      )
+    } catch (imgErr) {
+      logger.error('Webhook', 'Image processing failed', String(imgErr))
+      await sendMessage(chatId,
+        `❌ Erro ao ler imagem: ${String(imgErr)}\n\nEnvie o sinal em texto também.`,
+      )
+      return
+    }
+  }
+
+  try {
+    await insertSignal(result.signal as Record<string, unknown>)
+  } catch (insertErr) {
+    logger.error('Webhook', 'Insert failed', String(insertErr))
+    await sendMessage(chatId, `❌ Erro ao salvar: ${String(insertErr)}`)
+    return
+  }
+
+  logger.info('Webhook', [
+    'Signal saved',
+    `source=${result.source}`,
+    `status=${result.signal.status}`,
+    `conf=${(result.signal as { confidence_score?: number }).confidence_score ?? '?'}%`,
+  ].join(' | '))
+
+  await sendMessage(
+    chatId,
+    buildReply(result.replyData, result.stake, result.stakePct, result.source as ReplySource),
+  )
+}
+
 // ── Webhook ───────────────────────────────────────────────────────────────────
 
 router.post('/webhook', async (req: Request, res: Response) => {
@@ -284,102 +407,22 @@ router.post('/webhook', async (req: Request, res: Response) => {
     }
   }
 
-  // Respond immediately — Telegram retries if we don't
-  res.status(200).json({ ok: true })
+  const update = req.body as TelegramUpdate
 
   try {
-    const update = req.body as TelegramUpdate
-    logger.info('Webhook', `update_id=${update.update_id}`)
-
-    // Extract payload — downloads image if present
-    const payload = await extractTelegramSignalPayload(update)
-
-    logger.info('Webhook', [
-      `source_type=${payload.source_type}`,
-      `chat=${payload.chat_id}`,
-      `fwd="${payload.forwarded_from ?? '-'}"`,
-      `file_id=${payload.telegram_file_id ?? '-'}`,
-      `bytes=${payload.image_bytes ?? '-'}`,
-      `caption=${payload.caption ? `"${payload.caption.slice(0, 50)}"` : 'none'}`,
-      `download_error=${payload.download_error ?? 'none'}`,
-    ].join(' | '))
-
-    if (payload.source_type === 'unknown') return
-
-    const chatId = payload.chat_id
-
-    // Skip bot commands
-    if (payload.text?.startsWith('/')) return
-    if (!payload.text && !payload.image_base64) {
-      if (payload.download_error) {
-        await sendMessage(chatId,
-          `❌ Erro ao baixar imagem: ${payload.download_error}\n\nEnvie o sinal em texto também.`,
-        )
-      }
-      return
-    }
-
-    const settings = await loadSettings().catch(async (err) => {
-      await sendMessage(chatId, '❌ Configure a banca no dashboard primeiro.')
-      throw err
-    })
-
-    let result: Awaited<ReturnType<typeof processTextSignal>> | Awaited<ReturnType<typeof processImageSignal>>
-
-    if (payload.source_type === 'text') {
-      const text = payload.text!
-      if (text.length < 5) return
-      await sendMessage(chatId, '🤖 Analisando sinal com IA...')
-      result = await processTextSignal(text, settings, payload.message_id, {
-        forwarded_from: payload.forwarded_from,
-        source_type:    'text',
-      })
-    } else {
-      await sendMessage(chatId, '🔍 Analisando imagem com IA...')
-      try {
-        result = await processImageSignal(
-          payload.image_base64!,
-          payload.mime_type ?? 'image/jpeg',
-          settings,
-          payload.message_id,
-          {
-            caption:          payload.caption,
-            telegram_file_id: payload.telegram_file_id,
-            source_type:      payload.source_type,
-            forwarded_from:   payload.forwarded_from,
-          },
-        )
-      } catch (imgErr) {
-        logger.error('Webhook', 'Image processing failed', String(imgErr))
-        await sendMessage(chatId,
-          `❌ Erro ao ler imagem: ${String(imgErr)}\n\nEnvie o sinal em texto também.`,
-        )
-        return
-      }
-    }
-
-    const { error: insertError } = await supabase.from('signals').insert(result.signal)
-    if (insertError) {
-      logger.error('Webhook', 'Supabase insert failed', insertError.message)
-      await sendMessage(chatId, `❌ Erro ao salvar: ${insertError.message}`)
-      return
-    }
-
-    logger.info('Webhook', [
-      `Signal saved`,
-      `source=${result.source}`,
-      `status=${result.signal.status}`,
-      `conf=${(result.signal as { confidence_score?: number }).confidence_score ?? '?'}%`,
-    ].join(' | '))
-
-    await sendMessage(
-      chatId,
-      buildReply(result.replyData, result.stake, result.stakePct, result.source as ReplySource),
-    )
-
+    // Process BEFORE responding — Vercel may kill async work after res.json()
+    await Promise.race([
+      handleUpdate(update),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('Processing timeout (25s)')), 25000),
+      ),
+    ])
   } catch (err) {
-    logger.critical('Webhook', 'Unhandled webhook error', String(err))
+    logger.critical('Webhook', 'Update handler error', String(err))
   }
+
+  // Always respond 200 so Telegram doesn't retry
+  res.status(200).json({ ok: true })
 })
 
 // ── Set webhook ───────────────────────────────────────────────────────────────
