@@ -230,10 +230,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteSignal = useCallback(
     async (id: string) => {
+      let removed: Signal | undefined
+      setSignals((prev) => {
+        removed = prev.find((s) => s.id === id)
+        return prev.filter((s) => s.id !== id)
+      })
+      showToast('Sinal removido', 'info')
+
       const { error } = await supabase.from('signals').delete().eq('id', id)
-      if (!error) {
-        setSignals((prev) => prev.filter((s) => s.id !== id))
-        showToast('Sinal removido', 'info')
+      if (error) {
+        if (removed) {
+          const restored = removed
+          setSignals((prev) =>
+            prev.some((s) => s.id === restored.id)
+              ? prev
+              : [...prev, restored].sort(
+                  (a, b) =>
+                    new Date(b.received_at).getTime() - new Date(a.received_at).getTime(),
+                ),
+          )
+        }
+        showToast('Erro ao remover sinal', 'error')
       }
     },
     [showToast],

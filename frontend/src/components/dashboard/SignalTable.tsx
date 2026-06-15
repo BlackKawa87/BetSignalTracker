@@ -5,6 +5,7 @@ import { StatusBadge } from '../ui/Badge'
 import { formatDate, formatCurrency } from '../../utils/helpers'
 import { useApp } from '../../contexts/AppContext'
 import { EditSignalModal } from './EditSignalModal'
+import { SignalDetailModal } from './SignalDetailModal'
 
 interface SignalTableProps {
   signals: Signal[]
@@ -39,7 +40,10 @@ export function SignalTable({ signals, emptyMessage = 'Nenhum sinal.' }: SignalT
 function SignalRow({ signal }: { signal: Signal }) {
   const { markGreen, markRed, markVoid, deleteSignal } = useApp()
   const [editing, setEditing] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
+
+  const stop = (e: React.MouseEvent) => e.stopPropagation()
 
   const isPending = signal.status === 'pending' || signal.status === 'needs_review'
 
@@ -56,7 +60,8 @@ function SignalRow({ signal }: { signal: Signal }) {
   return (
     <>
       <div
-        className={`flex items-center gap-2 px-4 py-3 border-b border-dark-600 last:border-0 hover:bg-dark-700/30 transition-colors ${rowBorder}`}
+        onClick={() => setDetailOpen(true)}
+        className={`flex items-center gap-2 px-4 py-3 border-b border-dark-600 last:border-0 hover:bg-dark-700/30 transition-colors cursor-pointer ${rowBorder}`}
       >
         <span className="w-28 flex-shrink-0 text-xs text-gray-500 font-mono whitespace-nowrap">
           {formatDate(signal.received_at)}
@@ -100,25 +105,25 @@ function SignalRow({ signal }: { signal: Signal }) {
           )}
         </span>
 
-        <div className="w-32 flex-shrink-0 flex items-center justify-end gap-0.5">
+        <div className="w-32 flex-shrink-0 flex items-center justify-end gap-0.5" onClick={stop}>
           {isPending && (
             <>
               <button
-                onClick={() => markGreen(signal)}
+                onClick={(e) => { stop(e); markGreen(signal) }}
                 title="Marcar Green"
                 className="p-1.5 rounded-lg hover:bg-accent-green/10 text-gray-600 hover:text-accent-green transition-colors"
               >
                 <CheckCircle size={15} />
               </button>
               <button
-                onClick={() => markRed(signal)}
+                onClick={(e) => { stop(e); markRed(signal) }}
                 title="Marcar Red"
                 className="p-1.5 rounded-lg hover:bg-accent-red/10 text-gray-600 hover:text-accent-red transition-colors"
               >
                 <XCircle size={15} />
               </button>
               <button
-                onClick={() => markVoid(signal)}
+                onClick={(e) => { stop(e); markVoid(signal) }}
                 title="Anular"
                 className="p-1.5 rounded-lg hover:bg-gray-500/10 text-gray-700 hover:text-gray-400 transition-colors"
               >
@@ -127,14 +132,15 @@ function SignalRow({ signal }: { signal: Signal }) {
             </>
           )}
           <button
-            onClick={() => setEditing(true)}
+            onClick={(e) => { stop(e); setEditing(true) }}
             title="Editar"
             className="p-1.5 rounded-lg hover:bg-blue-500/10 text-gray-700 hover:text-blue-400 transition-colors"
           >
             <Pencil size={14} />
           </button>
           <button
-            onClick={() => {
+            onClick={(e) => {
+              stop(e)
               if (confirming) {
                 deleteSignal(signal.id)
               } else {
@@ -154,6 +160,7 @@ function SignalRow({ signal }: { signal: Signal }) {
         </div>
       </div>
       {editing && <EditSignalModal signal={signal} onClose={() => setEditing(false)} />}
+      {detailOpen && <SignalDetailModal signal={signal} onClose={() => setDetailOpen(false)} />}
     </>
   )
 }

@@ -339,6 +339,22 @@ const BASELINE_COLUMNS = new Set([
 ])
 
 async function insertSignal(signal: Record<string, unknown>): Promise<void> {
+  if (signal.telegram_message_id) {
+    const { data: existing } = await supabase
+      .from('signals')
+      .select('id')
+      .eq('telegram_message_id', signal.telegram_message_id as number)
+      .limit(1)
+      .single()
+    if (existing) {
+      logger.info(
+        'Webhook',
+        `Duplicate signal (message_id=${signal.telegram_message_id}) — skipping`,
+      )
+      return
+    }
+  }
+
   const { error } = await supabase.from('signals').insert(signal)
   if (!error) return
 
