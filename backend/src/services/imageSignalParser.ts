@@ -43,8 +43,19 @@ export interface ImagePick {
   raw_description: string | null
 }
 
+export type AccumulatorType = 'Simples' | 'Dupla' | 'Tripla' | 'Múltipla'
+
+export function accumulatorLabel(pickCount: number): AccumulatorType {
+  if (pickCount <= 1) return 'Simples'
+  if (pickCount === 2) return 'Dupla'
+  if (pickCount === 3) return 'Tripla'
+  return 'Múltipla'
+}
+
 export interface ImageParseResult {
   picks: ImagePick[]
+  accumulator_type: AccumulatorType
+  accumulator_odd: number | null
   raw_ai_json: string
   parse_error?: string
 }
@@ -53,9 +64,25 @@ export interface ImageParseResult {
 
 const BASE_SYSTEM_PROMPT = `You are an expert at reading sports betting slip screenshots.
 
-Analyze the image carefully and extract ALL bets visible. Return JSON: { "picks": [...] }
+Analyze the image carefully and extract ALL bets visible.
 
-For EACH pick extract:
+Return JSON with this structure:
+{
+  "accumulator_type": "Simples" | "Dupla" | "Tripla" | "Múltipla",
+  "accumulator_odd": <total combined odd as number, e.g. 72.0>,
+  "picks": [...]
+}
+
+accumulator_type rules:
+- 1 bet  → "Simples"
+- 2 bets → "Dupla"
+- 3 bets → "Tripla"
+- 4+ bets → "Múltipla"
+
+The accumulator_odd is the TOTAL odd shown at the bottom of the slip (e.g. "Tripla 72.00" → 72.0).
+If only one bet (Simples), accumulator_odd equals that single bet's odd.
+
+For EACH pick in the picks array extract:
 {
   "market_category": one of ["Result","Both Teams To Score","Over Under","Handicap","Double Chance","Team Total Goals","Corners","Race to Corners","Cards","Player Shots","Player Shots On Target","Bet Builder","Time Window","Other"],
   "market_name": full market name as shown (e.g. "1º Tempo - Escanteios Asiáticos - Mais de 2.0"),
@@ -66,7 +93,7 @@ For EACH pick extract:
   "line": the numeric threshold as string (e.g. "9.5", "-1.5", "2.0"), null if N/A,
   "period": "Full Time" | "1st Half" | "2nd Half" | "1st 10 min" | "1st 15 min" | null,
   "selection": exact selection (e.g. "Over", "Under", "Mais de", "Sim", "Yes", "No", "Home", "Away", "Draw"),
-  "odd": decimal odds as number (e.g. 1.85), null if not found,
+  "odd": this individual bet's decimal odds as number (e.g. 1.85), null if not found,
   "stake_percentage": tipster recommended stake as a number (e.g. 1.5 for "1.5%"), null if not found,
   "is_bet_builder": true if Bet Builder / Same Game Multi / Acumulador da mesma partida,
   "legs": for Bet Builders, array of {market: string, selection: string, line: string|null}; empty array otherwise,
@@ -78,11 +105,13 @@ RULES:
 - Extract ALL bets visible
 - For Bet Builder: is_bet_builder=true, list every leg in legs[], market_category="Bet Builder"
 - odd must be decimal >= 1.01
-- stake_percentage: look for "1.5%", "0.5% ✅", "2% stake", "Stake: 1%"
+- stake_percentage: look for "1.5%", "0.5% ✅", "2% stake", "Stake: 1%". Caption percentages (e.g. "0.25% ♻️") are per-leg stakes
 - market_category MUST be one of the allowed values exactly as spelled
 - "Escanteios" → Corners; "Corrida de Escanteios" → Race to Corners
 - "Escanteios Asiáticos" → Corners (Asian corners variant)
 - "Chutes a gol" → Player Shots On Target; "Chutes" → Player Shots; "Cartões" → Cards
+- "Marcar de Fora da Área", "Marcar de Cabeça", "Marcar a qualquer momento" → Result (scorer market)
+- "Jogador - Passes" → Other (player passes market)
 - period: detect from HT, FT, 1H, 2H, "1º Tempo", "2º Tempo", "Intervalo"
 - match: always "Home vs Away" format
 
@@ -165,7 +194,7 @@ export async function parseImageWithAI(
   captionText?: string,
 ): Promise<ImageParseResult> {
   if (!process.env.OPENAI_API_KEY) {
-    return { picks: [], raw_ai_json: '{}', parse_error: 'OPENAI_API_KEY not configured' }
+    return { picks: [], accumulator_type: 'Simples', accumulator_odd: null, raw_ai_json: '{}', parse_error: 'OPENAI_API_KEY not configured' }
   }
 
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -192,18 +221,21 @@ export async function parseImageWithAI(
   const rawContent = response.choices[0]?.message?.content ?? '{}'
   const cleaned    = rawContent.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
 
-  let parsed: { picks?: unknown[] } = {}
+  let parsed: { picks?: unknown[]; accumulator_type?: unknown; accumulator_odd?: unknown } = {}
   try {
-    parsed = JSON.parse(cleaned) as { picks?: unknown[] }
+    parsed = JSON.parse(cleaned) as typeof parsed
   } catch {
-    return { picks: [], raw_ai_json: rawContent, parse_error: 'Failed to parse AI response as JSON' }
+    return { picks: [], accumulator_type: 'Simples', accumulator_odd: null, raw_ai_json: rawContent, parse_error: 'Failed to parse AI response as JSON' }
   }
 
   const picks: ImagePick[] = Array.isArray(parsed.picks)
     ? (parsed.picks as Record<string, unknown>[]).map(normalizePick)
     : []
 
-  return { picks, raw_ai_json: JSON.stringify(parsed, null, 2) }
+  const accumulator_type = accumulatorLabel(picks.length)
+  const accumulator_odd  = clampOdd(parsed.accumulator_odd)
+
+  return { picks, accumulator_type, accumulator_odd, raw_ai_json: JSON.stringify(parsed, null, 2) }
 }
 
 // ── Convert pick → flat DB signal fields ─────────────────────────────────────

@@ -3,7 +3,7 @@ import { supabase } from '../utils/supabase'
 import { sendMessage, setWebhook, getWebhookInfo } from '../utils/telegram'
 import { extractTelegramSignalPayload, TelegramUpdate } from '../utils/telegramPayload'
 import { parseSignalWithAI } from '../services/aiSignalParser'
-import { parseImageWithAI, pickToSignalFields } from '../services/imageSignalParser'
+import { parseImageWithAI, pickToSignalFields, accumulatorLabel } from '../services/imageSignalParser'
 import { logger } from '../utils/logger'
 
 const router = Router()
@@ -181,58 +181,81 @@ async function processImageSignal(
     throw new Error(parsed.parse_error ?? 'Nenhuma aposta encontrada na imagem')
   }
 
+  const isAccumulator = parsed.picks.length > 1
+  const accType       = parsed.accumulator_type  // Dupla / Tripla / Múltipla / Simples
+  const totalOdd      = parsed.accumulator_odd   // combined odd from the slip bottom
+
+  // For accumulators: build legs from all picks; for singles: use first pick fields normally
   const pick   = parsed.picks[0]
   const fields = pickToSignalFields(pick)
 
-  const missing: string[] = []
-  if (!fields.home_team && !fields.away_team) missing.push('times')
-  if (!fields.odd)    missing.push('odd')
-  if (!fields.market) missing.push('mercado')
+  // Odd to use: total odd for accumulators, single pick odd otherwise
+  const effectiveOdd = isAccumulator ? totalOdd : fields.odd
 
-  const confidence_score = fields.confidence_score
-  const status: 'pending' | 'needs_review' =
-    missing.length > 0 || confidence_score < 80 ? 'needs_review' : 'pending'
-
-  // Prefer tipster stake from AI, fall back to settings
+  // Stake % from signal: use the first pick's (tipster usually lists same % per leg)
   const stakePct = fields.stake_percentage_from_signal ?? settings.stake_percentage
   const stake    = Math.round((settings.current_bankroll * stakePct) / 100 * 100) / 100
 
+  // Confidence: average across all picks
+  const avgConf = Math.round(
+    parsed.picks.reduce((sum, p) => sum + p.confidence_score, 0) / parsed.picks.length,
+  )
+
+  const missing: string[] = []
+  if (!effectiveOdd)          missing.push('odd total')
+  if (!fields.market && !isAccumulator) missing.push('mercado')
+
+  const status: 'pending' | 'needs_review' =
+    missing.length > 0 || avgConf < 80 ? 'needs_review' : 'pending'
+
+  // Build legs for accumulator: one entry per pick
+  const accLegs = isAccumulator
+    ? parsed.picks.map((p) => ({
+        market:    p.market_name ?? p.market_category ?? 'Mercado',
+        selection: p.selection ?? p.match ?? '?',
+        line:      p.line ?? null,
+      }))
+    : fields.legs
+
+  // Market label
+  const marketLabel = isAccumulator
+    ? accType  // "Dupla" / "Tripla" / "Múltipla"
+    : (fields.market ?? null)
+
   logger.info('ImageSignal', [
-    `conf=${confidence_score}%`,
+    `type=${accType}`,
+    `conf=${avgConf}%`,
     `status=${status}`,
-    `market=${fields.market ?? 'null'}`,
-    `odd=${fields.odd ?? 'null'}`,
-    `teams="${fields.home_team ?? '?'} x ${fields.away_team ?? '?'}"`,
+    `market=${marketLabel ?? 'null'}`,
+    `odd=${effectiveOdd ?? 'null'}`,
+    `picks=${parsed.picks.length}`,
     `stake_pct=${stakePct}%`,
-    `picks_total=${parsed.picks.length}`,
   ].join(' | '))
 
   const notes: string[] = []
-  if (missing.length > 0)         notes.push(`Revisão: ${missing.join(', ')}`)
-  if (parsed.picks.length > 1)    notes.push(`${parsed.picks.length} apostas na imagem`)
-  if (fields.is_bet_builder)      notes.push('Bet Builder')
-  if (extra.forwarded_from)       notes.push(`Fwd: ${extra.forwarded_from}`)
+  if (missing.length > 0)    notes.push(`Revisão: ${missing.join(', ')}`)
+  if (isAccumulator)         notes.push(`${accType}: ${parsed.picks.length} apostas`)
+  if (fields.is_bet_builder) notes.push('Bet Builder')
+  if (extra.forwarded_from)  notes.push(`Fwd: ${extra.forwarded_from}`)
 
-  const rawText = captionText
-    ? `[imagem] ${captionText}`
-    : '[imagem]'
+  const rawText = captionText ? `[imagem] ${captionText}` : '[imagem]'
 
   return {
     signal: {
       received_at:                  new Date().toISOString(),
-      home_team:                    fields.home_team,
-      away_team:                    fields.away_team,
-      market:                       fields.market,
-      market_category:              fields.market_category,
-      selection:                    fields.selection,
-      period:                       fields.period,
-      line:                         fields.line,
-      team:                         fields.team,
-      player:                       fields.player,
-      is_bet_builder:               fields.is_bet_builder,
-      legs:                         fields.legs.length > 0 ? fields.legs : null,
-      odd:                          fields.odd,
-      competition:                  fields.competition,
+      home_team:                    isAccumulator ? null : fields.home_team,
+      away_team:                    isAccumulator ? null : fields.away_team,
+      market:                       marketLabel,
+      market_category:              isAccumulator ? null : fields.market_category,
+      selection:                    isAccumulator ? null : fields.selection,
+      period:                       isAccumulator ? null : fields.period,
+      line:                         isAccumulator ? null : fields.line,
+      team:                         isAccumulator ? null : fields.team,
+      player:                       isAccumulator ? null : fields.player,
+      is_bet_builder:               !isAccumulator && fields.is_bet_builder,
+      legs:                         accLegs.length > 0 ? accLegs : null,
+      odd:                          effectiveOdd,
+      competition:                  isAccumulator ? null : fields.competition,
       bookmaker:                    settings.preferred_bookmaker,
       match_time:                   null,
       stake,
@@ -246,24 +269,24 @@ async function processImageSignal(
       forwarded_from:               extra.forwarded_from ?? null,
       stake_percentage_from_signal: fields.stake_percentage_from_signal,
       telegram_message_id:          messageId,
-      confidence_score,
+      confidence_score:             avgConf,
       notes:                        notes.length > 0 ? notes.join(' | ') : null,
     },
     replyData: {
-      home_team:                    fields.home_team,
-      away_team:                    fields.away_team,
-      market:                       fields.market,
-      odd:                          fields.odd,
-      competition:                  fields.competition,
+      home_team:                    isAccumulator ? null : fields.home_team,
+      away_team:                    isAccumulator ? null : fields.away_team,
+      market:                       marketLabel,
+      odd:                          effectiveOdd,
+      competition:                  isAccumulator ? null : fields.competition,
       match_time:                   null,
       status,
       stake_percentage_from_signal: fields.stake_percentage_from_signal,
-      is_multiple:                  parsed.picks.length > 1,
+      is_multiple:                  isAccumulator,
       picks_count:                  parsed.picks.length,
-      confidence_score,
-      reasoning: missing.length > 0
-        ? `Campos ausentes: ${missing.join(', ')}`
-        : `${parsed.picks.length} aposta(s) extraída(s) da imagem`,
+      confidence_score:             avgConf,
+      reasoning:                    isAccumulator
+        ? `${accType} com ${parsed.picks.length} apostas — Odd total: ${effectiveOdd}`
+        : missing.length > 0 ? `Campos ausentes: ${missing.join(', ')}` : undefined,
     },
     stake,
     stakePct,
