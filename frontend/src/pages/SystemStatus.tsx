@@ -6,6 +6,8 @@ import {
 import { supabase } from '../utils/supabase'
 import { useApp } from '../contexts/AppContext'
 import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { formatDate } from '../utils/helpers'
 
 // ── Health API response ───────────────────────────────────────
@@ -37,15 +39,15 @@ function Indicator({ state, label, sub }: { state: IndicatorState; label: string
     ok:      { icon: <CheckCircle size={16} className="text-accent-green" />,  border: 'border-accent-green/20',  bg: 'bg-accent-green/5' },
     warning: { icon: <AlertCircle  size={16} className="text-yellow-400" />,   border: 'border-yellow-400/20',    bg: 'bg-yellow-400/5' },
     error:   { icon: <XCircle      size={16} className="text-accent-red" />,   border: 'border-accent-red/20',    bg: 'bg-accent-red/5' },
-    loading: { icon: <RefreshCw    size={16} className="text-gray-500 animate-spin" />, border: 'border-dark-500', bg: 'bg-dark-700/30' },
+    loading: { icon: <RefreshCw    size={16} className="text-[color:var(--color-text-muted)] animate-spin" />, border: 'border-[color:var(--color-border)]', bg: 'bg-[color:var(--color-nav-hover-bg)]' },
   }[state]
 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-lg border ${cfg.border} ${cfg.bg}`}>
       <div className="flex-shrink-0">{cfg.icon}</div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-200">{label}</p>
-        {sub && <p className="text-[10px] text-gray-600 font-mono truncate mt-0.5">{sub}</p>}
+        <p className="text-sm font-medium text-[color:var(--color-text-primary)]">{label}</p>
+        {sub && <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono truncate mt-0.5">{sub}</p>}
       </div>
     </div>
   )
@@ -109,50 +111,47 @@ export function SystemStatusPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Status do Sistema</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
-            Visão geral da saúde de todos os serviços
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {lastRefresh && (
-            <span className="text-[10px] text-gray-600 font-mono">
-              Atualizado {lastRefresh.toLocaleTimeString('pt-BR')}
-            </span>
-          )}
-          <button
-            onClick={load}
-            disabled={loading}
-            className="p-2 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-dark-600 transition-colors"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Status da Plataforma"
+        subtitle="Monitoramento de saúde das integrações e serviços conectados."
+        actions={
+          <>
+            {lastRefresh && (
+              <span className="text-[10px] text-[color:var(--color-text-muted)] font-mono">
+                Atualizado {lastRefresh.toLocaleTimeString('pt-BR')}
+              </span>
+            )}
+            <button
+              onClick={load}
+              disabled={loading}
+              className="p-2 rounded-lg text-[color:var(--color-text-muted)] hover:text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-nav-hover-bg)] transition-colors"
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </>
+        }
+      />
 
       {/* Overall status banner */}
       <div className={`flex items-center gap-3 p-4 rounded-lg border ${
-        !health ? 'border-dark-500 bg-dark-700/30'
+        !health ? 'border-[color:var(--color-border)] bg-[color:var(--color-nav-hover-bg)]'
         : overallOk
           ? 'border-accent-green/30 bg-accent-green/5'
           : 'border-accent-red/30 bg-accent-red/5'
       }`}>
         {!health ? (
-          <RefreshCw size={18} className="text-gray-500 animate-spin flex-shrink-0" />
+          <RefreshCw size={18} className="text-[color:var(--color-text-muted)] animate-spin flex-shrink-0" />
         ) : overallOk ? (
           <CheckCircle size={18} className="text-accent-green flex-shrink-0" />
         ) : (
           <XCircle size={18} className="text-accent-red flex-shrink-0" />
         )}
         <div>
-          <p className={`font-semibold ${!health ? 'text-gray-500' : overallOk ? 'text-accent-green' : 'text-accent-red'}`}>
+          <p className={`font-semibold ${!health ? 'text-[color:var(--color-text-muted)]' : overallOk ? 'text-accent-green' : 'text-accent-red'}`}>
             {!health ? 'Verificando...' : overallOk ? 'Todos os sistemas operacionais' : 'Degradado — verifique os serviços abaixo'}
           </p>
           {health && (
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-xs text-[color:var(--color-text-muted)] mt-0.5">
               Latência da API: {health.latency_ms}ms · {health.timestamp.slice(0, 19).replace('T', ' ')} UTC
             </p>
           )}
@@ -162,7 +161,7 @@ export function SystemStatusPage() {
       {/* Services grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <Server size={10} /> Infraestrutura
           </p>
           <Indicator state={backendState}   label="Backend (Express/Vercel)" sub={health ? `status: ${health.status}` : undefined} />
@@ -170,7 +169,7 @@ export function SystemStatusPage() {
         </div>
 
         <div className="space-y-1">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <Wifi size={10} /> Integrações
           </p>
           <Indicator state={telegramState} label="Telegram Bot"       sub={health?.services.telegram} />
@@ -182,12 +181,12 @@ export function SystemStatusPage() {
 
       {/* Signal stats */}
       <Card className="p-4">
-        <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-3 flex items-center gap-1.5">
+        <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-3 flex items-center gap-1.5">
           <Activity size={10} /> Estatísticas de Sinais
         </p>
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 text-center">
           {[
-            { label: 'Total',    value: stats?.totalSignals ?? 0, color: 'text-white' },
+            { label: 'Total',    value: stats?.totalSignals ?? 0, color: 'text-[color:var(--color-text-primary)]' },
             { label: 'Greens',   value: stats?.greens ?? 0,       color: 'text-accent-green' },
             { label: 'Reds',     value: stats?.reds ?? 0,         color: 'text-accent-red' },
             { label: 'Pendentes',value: stats?.pending ?? 0,      color: 'text-yellow-400' },
@@ -195,7 +194,7 @@ export function SystemStatusPage() {
             { label: 'ROI',      value: `${(stats?.roi ?? 0).toFixed(1)}%`, color: (stats?.roi ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red' },
           ].map((s) => (
             <div key={s.label}>
-              <p className="text-[9px] text-gray-600 font-mono uppercase">{s.label}</p>
+              <p className="text-[9px] text-[color:var(--color-text-muted)] font-mono uppercase">{s.label}</p>
               <p className={`text-lg font-bold font-mono mt-0.5 ${s.color}`}>{s.value}</p>
             </div>
           ))}
@@ -205,17 +204,17 @@ export function SystemStatusPage() {
       {/* Last signal */}
       {lastSignal && (
         <Card className="p-4">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <Bot size={10} /> Último Sinal Recebido
           </p>
           <div className="flex items-center gap-3">
             <div className="flex-1">
-              <p className="text-sm text-gray-200">
+              <p className="text-sm text-[color:var(--color-text-primary)]">
                 {lastSignal.home_team && lastSignal.away_team
                   ? `${lastSignal.home_team} x ${lastSignal.away_team}`
                   : 'Jogo não identificado'}
               </p>
-              <p className="text-xs text-gray-500 font-mono mt-0.5">
+              <p className="text-xs text-[color:var(--color-text-muted)] font-mono mt-0.5">
                 {lastSignal.market ?? '—'} · odd {lastSignal.odd?.toFixed(2) ?? '—'}
               </p>
             </div>
@@ -228,15 +227,15 @@ export function SystemStatusPage() {
               }`}>
                 {lastSignal.status.toUpperCase()}
               </p>
-              <p className="text-[10px] text-gray-600 font-mono mt-0.5">
+              <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono mt-0.5">
                 {formatDate(lastSignal.received_at)}
               </p>
             </div>
           </div>
           {lastSignal.confidence_score !== null && (
             <div className="mt-2 flex items-center gap-2">
-              <Brain size={11} className="text-gray-600" />
-              <span className="text-[10px] text-gray-600 font-mono">Confiança IA: {lastSignal.confidence_score}%</span>
+              <Brain size={11} className="text-[color:var(--color-text-muted)]" />
+              <span className="text-[10px] text-[color:var(--color-text-muted)] font-mono">Confiança IA: {lastSignal.confidence_score}%</span>
             </div>
           )}
         </Card>
@@ -244,25 +243,23 @@ export function SystemStatusPage() {
 
       {/* Processing logs */}
       <Card>
-        <div className="px-4 py-3 border-b border-dark-600 flex items-center justify-between">
-          <p className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+        <div className="px-4 py-3 border-b border-[color:var(--color-border)] flex items-center justify-between">
+          <p className="text-sm font-semibold text-[color:var(--color-text-secondary)] flex items-center gap-2">
             <Clock size={13} /> Últimas atividades do Auto-Close
           </p>
           {lastLog && (
-            <span className="text-[10px] text-gray-600 font-mono">{formatDate(lastLog.created_at)}</span>
+            <span className="text-[10px] text-[color:var(--color-text-muted)] font-mono">{formatDate(lastLog.created_at)}</span>
           )}
         </div>
 
         {logs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-gray-600 text-sm">
-            Nenhuma atividade registrada ainda.
-          </div>
+          <EmptyState title="Nenhuma atividade registrada ainda." />
         ) : (
           <div>
             {logs.map((log) => {
               const isError = log.action === 'error'
               return (
-                <div key={log.id} className={`flex items-start gap-3 px-4 py-2.5 border-b border-dark-600/50 last:border-0 ${isError ? 'bg-red-500/3' : ''}`}>
+                <div key={log.id} className={`flex items-start gap-3 px-4 py-2.5 border-b border-[color:var(--color-border)] last:border-0 ${isError ? 'bg-red-500/5' : ''}`}>
                   {isError ? (
                     <XCircle size={13} className="text-accent-red flex-shrink-0 mt-0.5" />
                   ) : log.result === 'green' ? (
@@ -270,18 +267,18 @@ export function SystemStatusPage() {
                   ) : log.result === 'red' ? (
                     <XCircle size={13} className="text-accent-red flex-shrink-0 mt-0.5" />
                   ) : (
-                    <AlertCircle size={13} className="text-gray-500 flex-shrink-0 mt-0.5" />
+                    <AlertCircle size={13} className="text-[color:var(--color-text-muted)] flex-shrink-0 mt-0.5" />
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-400">{log.action}</p>
+                    <p className="text-xs text-[color:var(--color-text-secondary)]">{log.action}</p>
                     {typeof log.details?.reason === 'string' && (
-                      <p className="text-[10px] text-gray-600 truncate">{log.details.reason}</p>
+                      <p className="text-[10px] text-[color:var(--color-text-muted)] truncate">{log.details.reason}</p>
                     )}
                     {typeof log.details?.error === 'string' && (
                       <p className="text-[10px] text-accent-red/70 font-mono truncate">{log.details.error}</p>
                     )}
                   </div>
-                  <span className="text-[10px] text-gray-600 font-mono flex-shrink-0">
+                  <span className="text-[10px] text-[color:var(--color-text-muted)] font-mono flex-shrink-0">
                     {new Date(log.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
@@ -294,10 +291,10 @@ export function SystemStatusPage() {
       {/* Last error */}
       {lastError && (
         <Card className="p-4 border-accent-red/20">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <XCircle size={10} className="text-accent-red" /> Último Erro Registrado
           </p>
-          <p className="text-xs text-gray-400">{formatDate(lastError.created_at)}</p>
+          <p className="text-xs text-[color:var(--color-text-secondary)]">{formatDate(lastError.created_at)}</p>
           {typeof lastError.details?.error === 'string' && (
             <p className="text-xs text-accent-red/80 font-mono mt-1 break-all">{lastError.details.error}</p>
           )}
@@ -307,14 +304,14 @@ export function SystemStatusPage() {
       {/* Security summary */}
       {health && (
         <Card className="p-4">
-          <p className="text-[10px] text-gray-600 font-mono uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <p className="text-[10px] text-[color:var(--color-text-muted)] font-mono uppercase tracking-wider mb-3 flex items-center gap-1.5">
             <Server size={10} /> Variáveis de Ambiente
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {Object.entries(health.env).map(([key, present]) => (
               <div key={key} className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full flex-shrink-0 ${present ? 'bg-accent-green' : 'bg-accent-red'}`} />
-                <span className="text-[10px] text-gray-500 font-mono truncate">{key}</span>
+                <span className="text-[10px] text-[color:var(--color-text-muted)] font-mono truncate">{key}</span>
               </div>
             ))}
           </div>

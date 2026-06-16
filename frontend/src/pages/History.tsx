@@ -1,16 +1,18 @@
 import { useState } from 'react'
-import { Search, Filter } from 'lucide-react'
+import { Search, Filter, FileSearch } from 'lucide-react'
 import { useApp } from '../contexts/AppContext'
 import { SignalRow } from '../components/dashboard/SignalRow'
 import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { SignalStatus } from '../types'
 
 const STATUS_FILTERS: { label: string; value: SignalStatus | 'all' }[] = [
-  { label: 'Todos', value: 'all' },
+  { label: 'Todos',     value: 'all' },
   { label: 'Pendentes', value: 'pending' },
-  { label: 'Green', value: 'green' },
-  { label: 'Red', value: 'red' },
-  { label: 'Void', value: 'void' },
+  { label: 'Green',     value: 'green' },
+  { label: 'Red',       value: 'red' },
+  { label: 'Void',      value: 'void' },
 ]
 
 export function History() {
@@ -33,31 +35,31 @@ export function History() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Histórico de Sinais</h1>
-        <p className="text-gray-500 text-sm mt-0.5">{signals.length} sinais no total</p>
-      </div>
+      <PageHeader
+        title="Histórico"
+        subtitle="Todos os sinais recebidos com filtros por status e busca."
+      />
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--color-text-muted)]" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por time, mercado, campeonato..."
-            className="w-full bg-dark-800 border border-dark-600 rounded-lg pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-dark-400"
+            className="w-full rounded-lg pl-8 pr-3 py-2 text-sm bg-[color:var(--color-input-bg)] border border-[color:var(--color-input-border)] text-[color:var(--color-text-primary)] placeholder-[color:var(--color-text-muted)] focus:outline-none focus:border-brand transition-colors"
           />
         </div>
-        <div className="flex items-center gap-1">
-          <Filter size={14} className="text-gray-500 mr-1" />
+        <div className="flex items-center gap-1 flex-wrap">
+          <Filter size={14} className="text-[color:var(--color-text-muted)] mr-1" />
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
               onClick={() => setStatusFilter(f.value)}
-              className={`px-3 py-1.5 text-xs rounded-lg font-mono transition-colors ${
+              className={`px-3 py-1.5 text-xs rounded-lg font-mono transition-colors border ${
                 statusFilter === f.value
-                  ? 'bg-accent-green/10 text-accent-green border border-accent-green/30'
-                  : 'text-gray-500 hover:text-gray-300 border border-dark-600 hover:border-dark-400'
+                  ? 'bg-[color:var(--color-nav-active-bg)] text-[color:var(--color-nav-active-text)] border-brand/30'
+                  : 'text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)] border-[color:var(--color-border)] hover:border-[color:var(--color-border-strong)]'
               }`}
             >
               {f.label}
@@ -68,9 +70,11 @@ export function History() {
 
       <Card>
         {filtered.length === 0 ? (
-          <div className="px-4 py-10 text-center text-gray-600 text-sm">
-            Nenhum sinal encontrado.
-          </div>
+          <EmptyState
+            icon={<FileSearch size={18} />}
+            title="Nenhum sinal encontrado."
+            description="Tente ajustar os filtros ou o termo de busca."
+          />
         ) : (
           <div>
             {filtered.map((s) => (

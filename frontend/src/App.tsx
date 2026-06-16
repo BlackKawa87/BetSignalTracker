@@ -12,23 +12,8 @@ import { AnalyticsPage } from './pages/Analytics'
 import { ReviewPage } from './pages/Review'
 import { SystemStatusPage } from './pages/SystemStatus'
 import { TestLabPage } from './pages/TestLab'
-
-// Placeholder pages (will be built in Phase 2)
-function SignalIntelligencePage() {
-  return (
-    <div className="flex items-center justify-center h-64" style={{ color: 'var(--color-text-muted)' }}>
-      <p className="text-sm">Inteligência do Sinal — em breve</p>
-    </div>
-  )
-}
-
-function BancaPage() {
-  return (
-    <div className="flex items-center justify-center h-64" style={{ color: 'var(--color-text-muted)' }}>
-      <p className="text-sm">Gestão de Banca — em breve</p>
-    </div>
-  )
-}
+import { SignalIntelligencePage } from './pages/SignalIntelligence'
+import { BancaPage } from './pages/Banca'
 
 function Layout() {
   return (
