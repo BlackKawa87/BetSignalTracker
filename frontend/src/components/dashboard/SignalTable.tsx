@@ -16,7 +16,7 @@ export function SignalTable({ signals, emptyMessage = 'Nenhum sinal.' }: SignalT
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[700px]">
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-dark-600 text-[10px] font-mono text-gray-600 uppercase tracking-wider select-none">
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-[color:var(--color-border)] text-[10px] font-mono text-[color:var(--color-text-muted)] uppercase tracking-wider select-none">
           <span className="w-28 flex-shrink-0">Data</span>
           <span className="flex-1 min-w-0">Jogo</span>
           <span className="w-36 flex-shrink-0">Mercado</span>
@@ -28,7 +28,7 @@ export function SignalTable({ signals, emptyMessage = 'Nenhum sinal.' }: SignalT
         </div>
 
         {signals.length === 0 ? (
-          <div className="px-4 py-10 text-center text-gray-600 text-sm">{emptyMessage}</div>
+          <div className="px-4 py-10 text-center text-[color:var(--color-text-muted)] text-sm">{emptyMessage}</div>
         ) : (
           signals.map((s) => <SignalRow key={s.id} signal={s} />)
         )}
@@ -61,28 +61,28 @@ function SignalRow({ signal }: { signal: Signal }) {
     <>
       <div
         onClick={() => setDetailOpen(true)}
-        className={`flex items-center gap-2 px-4 py-3 border-b border-dark-600 last:border-0 hover:bg-dark-700/30 transition-colors cursor-pointer ${rowBorder}`}
+        className={`flex items-center gap-2 px-4 py-3 border-b border-[color:var(--color-border)] last:border-0 hover:bg-[color:var(--color-nav-hover-bg)] transition-colors cursor-pointer ${rowBorder}`}
       >
-        <span className="w-28 flex-shrink-0 text-xs text-gray-500 font-mono whitespace-nowrap">
+        <span className="w-28 flex-shrink-0 text-xs text-[color:var(--color-text-muted)] font-mono whitespace-nowrap">
           {formatDate(signal.received_at)}
         </span>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-gray-200 truncate">{game}</p>
+          <p className="text-sm text-[color:var(--color-text-primary)] truncate">{game}</p>
           {signal.notes && (
             <p className="text-[11px] text-orange-400/70 truncate mt-0.5 font-mono">{signal.notes}</p>
           )}
         </div>
 
-        <span className="w-36 flex-shrink-0 text-xs text-gray-400 truncate">
+        <span className="w-36 flex-shrink-0 text-xs text-[color:var(--color-text-secondary)] truncate">
           {signal.market ?? '—'}
         </span>
 
-        <span className="w-14 flex-shrink-0 text-xs font-mono text-gray-300 text-right">
+        <span className="w-14 flex-shrink-0 text-xs font-mono text-[color:var(--color-text-primary)] text-right">
           {signal.odd?.toFixed(2) ?? '—'}
         </span>
 
-        <span className="w-24 flex-shrink-0 text-xs font-mono text-gray-400 text-right">
+        <span className="w-24 flex-shrink-0 text-xs font-mono text-[color:var(--color-text-secondary)] text-right">
           {formatCurrency(signal.stake)}
         </span>
 
@@ -101,7 +101,7 @@ function SignalRow({ signal }: { signal: Signal }) {
               {formatCurrency(signal.profit_loss)}
             </span>
           ) : (
-            <span className="text-xs text-gray-600 font-mono">—</span>
+            <span className="text-xs text-[color:var(--color-text-muted)] font-mono">—</span>
           )}
         </span>
 
@@ -111,21 +111,21 @@ function SignalRow({ signal }: { signal: Signal }) {
               <button
                 onClick={(e) => { stop(e); markGreen(signal) }}
                 title="Marcar Green"
-                className="p-1.5 rounded-lg hover:bg-accent-green/10 text-gray-600 hover:text-accent-green transition-colors"
+                className="p-1.5 rounded-lg hover:bg-accent-green/10 text-[color:var(--color-text-muted)] hover:text-accent-green transition-colors"
               >
                 <CheckCircle size={15} />
               </button>
               <button
                 onClick={(e) => { stop(e); markRed(signal) }}
                 title="Marcar Red"
-                className="p-1.5 rounded-lg hover:bg-accent-red/10 text-gray-600 hover:text-accent-red transition-colors"
+                className="p-1.5 rounded-lg hover:bg-accent-red/10 text-[color:var(--color-text-muted)] hover:text-accent-red transition-colors"
               >
                 <XCircle size={15} />
               </button>
               <button
                 onClick={(e) => { stop(e); markVoid(signal) }}
                 title="Anular"
-                className="p-1.5 rounded-lg hover:bg-gray-500/10 text-gray-700 hover:text-gray-400 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-gray-500/10 text-[color:var(--color-text-muted)] hover:text-[color:var(--color-text-secondary)] transition-colors"
               >
                 <Slash size={14} />
               </button>
@@ -134,7 +134,7 @@ function SignalRow({ signal }: { signal: Signal }) {
           <button
             onClick={(e) => { stop(e); setEditing(true) }}
             title="Editar"
-            className="p-1.5 rounded-lg hover:bg-blue-500/10 text-gray-700 hover:text-blue-400 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-blue-500/10 text-[color:var(--color-text-muted)] hover:text-blue-400 transition-colors"
           >
             <Pencil size={14} />
           </button>
@@ -152,7 +152,7 @@ function SignalRow({ signal }: { signal: Signal }) {
             className={`p-1.5 rounded-lg transition-colors ${
               confirming
                 ? 'bg-accent-red/20 text-accent-red'
-                : 'text-gray-700 hover:text-accent-red hover:bg-accent-red/10'
+                : 'text-[color:var(--color-text-muted)] hover:text-accent-red hover:bg-accent-red/10'
             }`}
           >
             <Trash2 size={14} />

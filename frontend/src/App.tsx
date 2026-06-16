@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppProvider } from './contexts/AppContext'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { Sidebar } from './components/layout/Sidebar'
 import { ToastStack } from './components/ui/Toast'
 import { Dashboard } from './pages/Dashboard'
@@ -12,22 +13,41 @@ import { ReviewPage } from './pages/Review'
 import { SystemStatusPage } from './pages/SystemStatus'
 import { TestLabPage } from './pages/TestLab'
 
+// Placeholder pages (will be built in Phase 2)
+function SignalIntelligencePage() {
+  return (
+    <div className="flex items-center justify-center h-64" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-sm">Inteligência do Sinal — em breve</p>
+    </div>
+  )
+}
+
+function BancaPage() {
+  return (
+    <div className="flex items-center justify-center h-64" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-sm">Gestão de Banca — em breve</p>
+    </div>
+  )
+}
+
 function Layout() {
   return (
-    <div className="flex min-h-screen bg-dark-900">
+    <div className="flex min-h-screen" style={{ background: 'var(--color-surface)' }}>
       <Sidebar />
       <main className="flex-1 p-6 overflow-auto">
         <div className="max-w-5xl mx-auto">
           <Routes>
-            <Route path="/"            element={<Dashboard />} />
-            <Route path="/historico"   element={<History />} />
-            <Route path="/estatisticas" element={<Stats />} />
-            <Route path="/auto-close"  element={<AutoClosePage />} />
-            <Route path="/analytics"   element={<AnalyticsPage />} />
-            <Route path="/revisao"        element={<ReviewPage />} />
-            <Route path="/system-status"  element={<SystemStatusPage />} />
-            <Route path="/test-lab"       element={<TestLabPage />} />
-            <Route path="/configuracoes" element={<SettingsPage />} />
+            <Route path="/"                    element={<Dashboard />} />
+            <Route path="/historico"           element={<History />} />
+            <Route path="/estatisticas"        element={<Stats />} />
+            <Route path="/auto-close"          element={<AutoClosePage />} />
+            <Route path="/analytics"           element={<AnalyticsPage />} />
+            <Route path="/revisao"             element={<ReviewPage />} />
+            <Route path="/system-status"       element={<SystemStatusPage />} />
+            <Route path="/test-lab"            element={<TestLabPage />} />
+            <Route path="/configuracoes"       element={<SettingsPage />} />
+            <Route path="/signal-intelligence" element={<SignalIntelligencePage />} />
+            <Route path="/banca"               element={<BancaPage />} />
           </Routes>
         </div>
       </main>
@@ -39,9 +59,11 @@ function Layout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppProvider>
-        <Layout />
-      </AppProvider>
+      <ThemeProvider>
+        <AppProvider>
+          <Layout />
+        </AppProvider>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

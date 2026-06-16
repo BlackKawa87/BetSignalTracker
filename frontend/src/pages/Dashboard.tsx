@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import {
   TrendingUp, TrendingDown, Target, DollarSign, Zap,
-  CheckCircle, XCircle, Clock, Plus, RefreshCw, AlertTriangle,
-  BarChart2, Percent,
+  CheckCircle, Clock, Plus, RefreshCw, AlertTriangle,
+  Percent, Radio,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -11,6 +11,8 @@ import { useApp } from '../contexts/AppContext'
 import { StatCard } from '../components/dashboard/StatCard'
 import { SignalTable } from '../components/dashboard/SignalTable'
 import { Card } from '../components/ui/Card'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState } from '../components/ui/EmptyState'
 import { formatCurrency, formatPercent, calculateStake, formatDateShort } from '../utils/helpers'
 import { parseSignal } from '../utils/signalParser'
 
@@ -64,24 +66,24 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        <RefreshCw size={20} className="animate-spin mr-2" /> Carregando...
+      <div className="flex items-center justify-center h-64" style={{ color: 'var(--color-text-muted)' }}>
+        <RefreshCw size={18} className="animate-spin mr-2" />
+        <span className="text-sm">Carregando...</span>
       </div>
     )
   }
 
-  const pendingSignals   = signals.filter((s) => s.status === 'pending')
-  const reviewSignals    = signals.filter((s) => s.status === 'needs_review')
-  const recentSignals    = signals.slice(0, 30)
-  const currentStake     = calculateStake(settings?.current_bankroll ?? 0, settings?.stake_percentage ?? 2)
-  const profitLoss       = stats?.totalProfitLoss ?? 0
-  const profitIsPositive = profitLoss >= 0
+  const pendingSignals = signals.filter((s) => s.status === 'pending')
+  const reviewSignals  = signals.filter((s) => s.status === 'needs_review')
+  const recentSignals  = signals.slice(0, 30)
+  const currentStake   = calculateStake(settings?.current_bankroll ?? 0, settings?.stake_percentage ?? 2)
+  const profitLoss     = stats?.totalProfitLoss ?? 0
+  const profitPositive = profitLoss >= 0
 
   const chartData = bankrollHistory.map((h) => ({
     date: formatDateShort(h.created_at),
     banca: h.bankroll,
   }))
-
   if (settings && chartData.length === 0) {
     chartData.push({ date: 'Início', banca: settings.initial_bankroll })
   }
@@ -93,63 +95,65 @@ export function Dashboard() {
     <div className="space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
-            Stake atual:{' '}
-            <span className="text-accent-green font-mono font-bold">
-              {formatCurrency(currentStake)}
-            </span>
-            <span className="text-gray-600 ml-2">
-              ({settings?.stake_percentage ?? 2}% de {formatCurrency(settings?.current_bankroll ?? 0)})
-            </span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={refreshAll}
-            className="p-2 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-dark-600 transition-colors"
-            title="Atualizar"
-          >
-            <RefreshCw size={16} />
-          </button>
-          <button
-            onClick={() => setShowAddForm((v) => !v)}
-            className="flex items-center gap-2 px-4 py-2 bg-accent-green text-dark-900 font-semibold rounded-lg hover:bg-accent-green/90 transition-colors text-sm"
-          >
-            <Plus size={16} /> Novo Sinal
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Central de Sinais"
+        subtitle="Acompanhe suas entradas recebidas pelo Telegram, controle sua banca e monitore seus resultados em tempo real."
+        actions={
+          <>
+            <button
+              onClick={refreshAll}
+              className="p-2 rounded-lg transition-colors"
+              style={{ color: 'var(--color-text-muted)' }}
+              title="Atualizar"
+            >
+              <RefreshCw size={15} />
+            </button>
+            <button
+              onClick={() => setShowAddForm((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2 bg-brand text-white font-semibold rounded-lg hover:opacity-90 transition-opacity text-sm"
+            >
+              <Plus size={15} />
+              Novo Sinal
+            </button>
+          </>
+        }
+      />
 
       {/* Add signal form */}
       {showAddForm && (
         <Card className="p-4 animate-fade-in">
-          <p className="text-sm text-gray-400 mb-3 font-medium">Cole o sinal do Telegram:</p>
+          <p className="text-sm font-medium mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+            Cole o texto do sinal recebido:
+          </p>
           <textarea
             value={signalText}
             onChange={(e) => setSignalText(e.target.value)}
             placeholder="Ex: SINAL: Ambas Marcam SIM — Flamengo x Palmeiras — Odd 1.75"
             rows={3}
-            className="w-full bg-dark-700 border border-dark-500 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-dark-400 resize-none font-mono"
+            className="w-full rounded-lg px-3 py-2 text-sm placeholder-[color:var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-brand/30 resize-none font-mono border"
+            style={{
+              background: 'var(--color-input-bg)',
+              borderColor: 'var(--color-input-border)',
+              color: 'var(--color-text-primary)',
+            }}
           />
           <div className="flex items-center justify-between mt-3">
-            <p className="text-xs text-gray-600">
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               Stake automática:{' '}
-              <span className="text-accent-green font-mono">{formatCurrency(currentStake)}</span>
+              <span className="font-mono font-semibold text-brand">{formatCurrency(currentStake)}</span>
             </p>
             <div className="flex gap-2">
               <button
                 onClick={() => { setShowAddForm(false); setSignalText('') }}
-                className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+                className="px-3 py-1.5 text-sm transition-colors"
+                style={{ color: 'var(--color-text-muted)' }}
               >
                 Cancelar
               </button>
               <button
                 onClick={handleAddSignal}
                 disabled={!signalText.trim() || adding}
-                className="px-4 py-1.5 bg-accent-green text-dark-900 font-semibold rounded-lg text-sm disabled:opacity-40 hover:bg-accent-green/90 transition-colors"
+                className="px-4 py-1.5 bg-brand text-white font-semibold rounded-lg text-sm disabled:opacity-40 hover:opacity-90 transition-opacity"
               >
                 {adding ? 'Salvando...' : 'Salvar Sinal'}
               </button>
@@ -160,17 +164,17 @@ export function Dashboard() {
 
       {/* Needs review alert */}
       {reviewSignals.length > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-orange-400/5 border border-orange-400/20 rounded-lg">
-          <AlertTriangle size={16} className="text-orange-400 flex-shrink-0" />
-          <p className="text-sm text-orange-300/90">
-            <strong>{reviewSignals.length}</strong> sinal{reviewSignals.length > 1 ? 'is precisam' : ' precisa'} de revisão manual.
-            Clique em <strong>Editar</strong> para preencher os dados faltantes.
+        <div className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-200 rounded-lg dark:bg-orange-400/5 dark:border-orange-400/20">
+          <AlertTriangle size={15} className="text-orange-500 flex-shrink-0" />
+          <p className="text-sm text-orange-700 dark:text-orange-300">
+            <strong>{reviewSignals.length}</strong> sinal{reviewSignals.length > 1 ? 'is precisam' : ' precisa'} de revisão.
+            Vá para <strong>Revisão de Sinais</strong> para preencher os dados faltantes.
           </p>
         </div>
       )}
 
       {/* Primary stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
           label="Banca Atual"
           value={formatCurrency(stats?.currentBankroll ?? 0)}
@@ -180,9 +184,9 @@ export function Dashboard() {
         />
         <StatCard
           label="Lucro / Prejuízo"
-          value={`${profitIsPositive ? '+' : ''}${formatCurrency(profitLoss)}`}
-          icon={profitIsPositive ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-          accent={profitIsPositive ? 'green' : 'red'}
+          value={`${profitPositive ? '+' : ''}${formatCurrency(profitLoss)}`}
+          icon={profitPositive ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+          accent={profitPositive ? 'green' : 'red'}
         />
         <StatCard
           label="ROI"
@@ -194,61 +198,46 @@ export function Dashboard() {
         <StatCard
           label="Taxa de Acerto"
           value={formatPercent(stats?.winRate ?? 0)}
-          icon={<BarChart2 size={16} />}
+          icon={<CheckCircle size={16} />}
           accent={stats && stats.winRate >= 50 ? 'green' : 'yellow'}
           subtext={`${stats?.greens ?? 0}W / ${stats?.reds ?? 0}L`}
         />
-      </div>
-
-      {/* Secondary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard
-          label="Total"
-          value={String(stats?.totalSignals ?? 0)}
-          icon={<Zap size={16} />}
-          subtext="sinais"
-        />
-        <StatCard
-          label="Greens"
-          value={String(stats?.greens ?? 0)}
-          icon={<CheckCircle size={16} />}
-          accent="green"
-        />
-        <StatCard
-          label="Reds"
-          value={String(stats?.reds ?? 0)}
-          icon={<XCircle size={16} />}
-          accent="red"
-        />
-        <StatCard
-          label="Pendentes"
-          value={String(stats?.pending ?? 0)}
-          icon={<Clock size={16} />}
-          accent="yellow"
-        />
-        <StatCard
-          label="Stake Atual"
+          label="Stake Recomendada"
           value={formatCurrency(currentStake)}
           icon={<Percent size={16} />}
           accent="blue"
           subtext={`${settings?.stake_percentage ?? 2}% da banca`}
         />
+        <StatCard
+          label="Pendentes"
+          value={String(stats?.pending ?? 0)}
+          icon={<Clock size={16} />}
+          accent={stats && (stats.pending ?? 0) > 0 ? 'yellow' : 'default'}
+          subtext="aguardando resultado"
+        />
       </div>
 
-      {/* Pending signals */}
+      {/* Pending + review signals */}
       {(pendingSignals.length > 0 || reviewSignals.length > 0) && (
         <Card>
-          <div className="px-4 py-3 border-b border-dark-600 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-300">
-              Aguardando resultado
-            </h2>
+          <div
+            className="px-4 py-3 border-b flex items-center justify-between"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center gap-2">
+              <Radio size={14} className="text-amber-500" />
+              <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                Aguardando resultado
+              </h2>
+            </div>
             <div className="flex items-center gap-2">
               {reviewSignals.length > 0 && (
-                <span className="text-xs font-mono px-2 py-0.5 bg-orange-400/10 text-orange-400 border border-orange-400/20 rounded-md">
-                  {reviewSignals.length} revisar
+                <span className="text-xs font-mono px-2 py-0.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-md dark:bg-orange-400/10 dark:text-orange-400 dark:border-orange-400/20">
+                  {reviewSignals.length} p/ revisar
                 </span>
               )}
-              <span className="text-xs font-mono text-gray-600">
+              <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
                 {pendingSignals.length + reviewSignals.length} sinais
               </span>
             </div>
@@ -261,64 +250,56 @@ export function Dashboard() {
       {chartData.length > 2 && (
         <Card className="p-4">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-300">Evolução da Banca</h2>
-            <span className="text-xs font-mono text-gray-600">{bankrollHistory.length} movimentos</span>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              Evolução da Banca
+            </h2>
+            <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+              {bankrollHistory.length} movimentos
+            </span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="bancaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#00d084" stopOpacity={0.25} />
+                  <stop offset="5%"  stopColor="#00d084" stopOpacity={0.2} />
                   <stop offset="95%" stopColor="#00d084" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <XAxis
-                dataKey="date"
-                stroke="#242430"
-                tick={{ fill: '#444', fontSize: 10 }}
-                tickLine={false}
-              />
-              <YAxis
-                stroke="#242430"
-                tick={{ fill: '#444', fontSize: 10 }}
-                tickFormatter={(v: number) => `R$${v.toFixed(0)}`}
-                width={56}
-                tickLine={false}
-              />
+              <XAxis dataKey="date" stroke="transparent" tick={{ fill: 'var(--color-text-muted)', fontSize: 10 }} tickLine={false} />
+              <YAxis stroke="transparent" tick={{ fill: 'var(--color-text-muted)', fontSize: 10 }} tickFormatter={(v: number) => `R$${v.toFixed(0)}`} width={56} tickLine={false} />
               <Tooltip
-                contentStyle={{
-                  background: '#111118',
-                  border: '1px solid #2e2e3a',
-                  borderRadius: 8,
-                  fontSize: 12,
-                }}
+                contentStyle={{ background: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: 8, fontSize: 12 }}
                 formatter={(v: number) => [formatCurrency(v), 'Banca']}
-                labelStyle={{ color: '#888' }}
+                labelStyle={{ color: 'var(--color-text-muted)' }}
               />
-              <Area
-                type="monotone"
-                dataKey="banca"
-                stroke="#00d084"
-                strokeWidth={2}
-                fill="url(#bancaGrad)"
-                dot={false}
-                activeDot={{ r: 4, fill: '#00d084' }}
-              />
+              <Area type="monotone" dataKey="banca" stroke="#00d084" strokeWidth={2} fill="url(#bancaGrad)" dot={false} activeDot={{ r: 4, fill: '#00d084' }} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
       )}
 
-      {/* All recent signals */}
+      {/* Recent signals */}
       <Card>
-        <div className="px-4 py-3 border-b border-dark-600 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-300">Sinais Recentes</h2>
-          <span className="text-xs font-mono text-gray-600">{recentSignals.length} de {signals.length}</span>
+        <div
+          className="px-4 py-3 border-b flex items-center justify-between"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            Sinais Recebidos
+          </h2>
+          <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+            {recentSignals.length} de {signals.length}
+          </span>
         </div>
-        <SignalTable
-          signals={recentSignals}
-          emptyMessage='Nenhum sinal ainda. Clique em "Novo Sinal" para começar ou envie uma imagem para o bot.'
-        />
+        {signals.length === 0 ? (
+          <EmptyState
+            icon={<Zap size={20} />}
+            title="Nenhum sinal recebido ainda."
+            description="Encaminhe uma aposta do Telegram para o seu bot e ela aparecerá aqui automaticamente."
+          />
+        ) : (
+          <SignalTable signals={recentSignals} />
+        )}
       </Card>
     </div>
   )

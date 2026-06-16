@@ -2,48 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Semantic color tokens ─────────────────────────────────── */
+:root {
+  /* Light mode (default) */
+  --color-surface:       #F7F8FA;
+  --color-card:          #FFFFFF;
+  --color-border:        #E5E7EB;
+  --color-border-strong: #D1D5DB;
+  --color-text-primary:  #111827;
+  --color-text-secondary:#374151;
+  --color-text-muted:    #9CA3AF;
+  --color-sidebar-bg:    #FFFFFF;
+  --color-sidebar-border:#E5E7EB;
+  --color-nav-active-bg: #F0FDF7;
+  --color-nav-active-text:#00b870;
+  --color-nav-hover-bg:  #F9FAFB;
+  --color-input-bg:      #F9FAFB;
+  --color-input-border:  #D1D5DB;
+  --color-scrollbar:     #E5E7EB;
+  --color-scrollbar-thumb:#CBD5E1;
+}
+
+html.dark {
+  /* Dark mode */
+  --color-surface:       #0a0a0f;
+  --color-card:          #111118;
+  --color-border:        #242430;
+  --color-border-strong: #2e2e3a;
+  --color-text-primary:  #F9FAFB;
+  --color-text-secondary:#D1D5DB;
+  --color-text-muted:    #6B7280;
+  --color-sidebar-bg:    #111118;
+  --color-sidebar-border:#242430;
+  --color-nav-active-bg: rgba(0,208,132,0.08);
+  --color-nav-active-text:#00d084;
+  --color-nav-hover-bg:  #1a1a24;
+  --color-input-bg:      #1a1a24;
+  --color-input-border:  #2e2e3a;
+  --color-scrollbar:     #111118;
+  --color-scrollbar-thumb:#2e2e3a;
+}
+
 @layer base {
-  * {
-    box-sizing: border-box;
+  * { box-sizing: border-box; }
+
+  html {
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
   }
 
   body {
-    background-color: #0a0a0f;
-    color: #e8e8e8;
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #111118;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #2e2e3a;
-    border-radius: 2px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #3a3a48;
-  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--color-scrollbar); }
+  ::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 2px; }
 }
 
 @layer utilities {
   .animate-fade-in {
-    animation: fadeIn 0.2s ease-out;
+    animation: fadeIn 0.18s ease-out;
   }
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
